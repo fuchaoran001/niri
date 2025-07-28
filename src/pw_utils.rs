@@ -1,3 +1,10 @@
+//! 作用：PipeWire屏幕共享实现
+//! 说明：提供与PipeWire集成的屏幕共享功能，支持Wayland输出和窗口的实时捕获
+//! 关键组件：
+//!   - PipeWire核心连接管理
+//!   - GBM/DMABUF缓冲区分配
+//!   - 视频流参数协商
+//!   - 渲染帧同步机制
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::Cursor;

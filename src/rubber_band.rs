@@ -1,39 +1,151 @@
-#[derive(Debug, Clone, Copy)]
+// rubber_band.rs
+// 此文件实现了橡皮筋效果算法，用于处理超出边界时的弹性效果
+// 在合成器中，橡皮筋效果常用于滚动、拖拽等交互，提供自然的边界反馈
+
+// 橡皮筋效果参数结构体
+#[derive(Debug, Clone, Copy)]  // 自动实现Debug、Clone和Copy trait
 pub struct RubberBand {
-    pub stiffness: f64,
-    pub limit: f64,
+    pub stiffness: f64,  // 刚度系数：值越大，弹性越强（阻力越大）
+    pub limit: f64,      // 极限距离：超过此距离时弹性效果达到最大
 }
 
 impl RubberBand {
+    /// 计算给定超出距离的弹性偏移量
+    /// 参数: x - 超出边界的距离
+    /// 返回值: 弹性偏移量（0 <= 返回值 < limit）
     pub fn band(&self, x: f64) -> f64 {
-        let c = self.stiffness;
-        let d = self.limit;
+        let c = self.stiffness;  // 刚度系数
+        let d = self.limit;      // 极限距离
 
+        // 橡皮筋公式: f(x) = d * [1 - 1/(c*x/d + 1)]
+        // 当x=0时: f(0) = 0
+        // 当x→∞时: f(x) → d (渐进线)
         (1. - (1. / (x * c / d + 1.))) * d
     }
 
+    /// 计算band函数的导数（变化率）
+    /// 用于计算动画速度（如惯性滚动）
+    /// 参数: x - 超出边界的距离
+    /// 返回值: 弹性效果的瞬时变化率
     pub fn derivative(&self, x: f64) -> f64 {
         let c = self.stiffness;
         let d = self.limit;
 
+        // 导数公式: f'(x) = c*d² / (c*x + d)²
+        // 当x=0时: f'(0) = c (初始斜率)
+        // 当x→∞时: f'(x) → 0 (变化率趋近0)
         c * d * d / (c * x + d).powi(2)
     }
 
+    /// 应用橡皮筋效果的钳制函数
+    /// 参数:
+    ///   min - 边界最小值
+    ///   max - 边界最大值
+    ///   x - 原始位置
+    /// 返回值: 应用橡皮筋效果后的位置
     pub fn clamp(&self, min: f64, max: f64, x: f64) -> f64 {
+        // 1. 先进行基本钳制（确保在[min, max]范围内）
         let clamped = x.clamp(min, max);
-        let sign = if x < clamped { -1. } else { 1. };
-        let diff = (x - clamped).abs();
-
+        
+        // 2. 计算超出边界的距离和方向
+        let sign = if x < clamped { 
+            -1.  // 低于最小值
+        } else { 
+            1.   // 高于最大值
+        };
+        let diff = (x - clamped).abs();  // 超出距离
+        
+        // 3. 应用橡皮筋公式计算弹性偏移
         clamped + sign * self.band(diff)
     }
 
+    /// 计算clamp函数的导数（变化率）
+    /// 用于预测动画行为
+    /// 参数:
+    ///   min - 边界最小值
+    ///   max - 边界最大值
+    ///   x - 原始位置
+    /// 返回值: 位置变化率（在边界内为1.0，边界外小于1.0）
     pub fn clamp_derivative(&self, min: f64, max: f64, x: f64) -> f64 {
+        // 在边界内部：变化率为1（无阻力）
         if min <= x && x <= max {
             return 1.;
         }
 
-        let clamped = x.clamp(min, max);
-        let diff = (x - clamped).abs();
+        // 在边界外部：
+        let clamped = x.clamp(min, max);  // 钳制位置
+        let diff = (x - clamped).abs();   // 超出距离
+        
+        // 返回橡皮筋效果的导数
         self.derivative(diff)
     }
 }
+
+/* 橡皮筋效果数学原理
+1. 核心公式:
+   f(x) = d * [1 - 1/(c*x/d + 1)]
+   其中:
+     x: 超出边界的距离
+     d: 最大弹性位移 (limit)
+     c: 刚度系数 (stiffness)
+
+2. 函数特性:
+   - f(0) = 0
+   - lim(x→∞) f(x) = d (渐进线)
+   - f'(0) = c (初始斜率为刚度系数)
+
+3. 导数公式:
+   f'(x) = c * d² / (c*x + d)²
+
+4. 在合成器中的应用场景:
+   +-------------------------------+
+   | 用户拖拽窗口超出屏幕边缘        |
+   | 窗口位置: x = 屏幕宽度 + 50px  |
+   | 橡皮筋效果:                   |
+   |   clamped = 屏幕宽度          |
+   |   diff = 50px                |
+   |   实际位置 = 屏幕宽度 + band(50)|
+   +-------------------------------+
+
+5. 参数选择指南:
+   - stiffness: 0.1-0.5 (中等弹性) 1.0+ (强弹性)
+   - limit: 通常设置为屏幕尺寸的10-20%
+
+6. 效果示意图:
+   超出距离(x)
+     ^
+     |     *********      (d = limit)
+     |    *        * 
+     |   *         * 
+     |  *          * 
+     | *           * 
+     |*            * 
+0 ---+-------------*------> 位置
+     |             * 
+     |             * 
+     0             d
+*/
+
+/* 计算过程示例
+假设:
+  stiffness = 0.2
+  limit = 100.0
+  x = 50.0 (超出边界50px)
+
+band(50)计算:
+  c*x/d = 0.2*50/100 = 0.1
+  1/(0.1 + 1) = 1/1.1 ≈ 0.909
+  1 - 0.909 = 0.091
+  0.091 * 100 = 9.1
+
+结果:
+  实际位置 = 边界位置 + 9.1px
+
+导数计算:
+  f'(50) = 0.2*100² / (0.2*50 + 100)²
+          = 2000 / (10 + 100)²
+          = 2000 / 12100 ≈ 0.165
+
+表示:
+  当超出50px时，继续拖拽的阻力是正常情况的16.5%
+*/

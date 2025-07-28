@@ -1,3 +1,39 @@
+// 这个文件是 Niri 窗口管理器的渲染工具集核心模块，提供了多种高级渲染功能、渲染元素管理和渲染目标处理。以下是它的主要功能和组件：
+// 核心功能
+
+//     渲染目标管理 (RenderTarget):
+
+//         区分不同渲染场景：屏幕输出(Output)、录屏(Screencast)、截图(ScreenCapture)
+
+//         支持隐私保护：根据配置决定是否屏蔽特定内容
+
+//     渲染元素处理:
+
+//         BakedBuffer：封装渲染缓冲区及其位置/尺寸信息
+
+//         SplitElements：将元素分为主元素和弹出层元素
+
+//         ToRenderElement trait：统一转换不同类型元素为可渲染元素
+
+//     高级渲染操作:
+
+//         render_to_texture()：渲染到离屏纹理
+
+//         render_to_encompassing_texture()：自动计算包围盒并渲染
+
+//         render_and_download()：渲染并下载到内存
+
+//         render_to_dmabuf()：渲染到 DMA-BUF（硬件加速）
+
+//         render_to_shm()：渲染到共享内存（Wayland 兼容）
+
+//         clear_dmabuf()：清空 DMA-BUF
+
+//     几何计算:
+
+//         encompassing_geo()：计算一组元素的包围几何区域
+
+
 use std::ptr;
 
 use anyhow::{ensure, Context};

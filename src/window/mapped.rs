@@ -1,204 +1,178 @@
-use std::cell::{Cell, Ref, RefCell};
-use std::time::Duration;
+// window/mapped.rs
+// 此文件实现了已映射窗口的管理逻辑，包括渲染、状态跟踪和交互处理
+// 在合成器中，已映射窗口代表用户可见并可交互的窗口实体
 
-use niri_config::{Color, CornerRadius, GradientInterpolation, WindowRule};
-use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
-use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::desktop::space::SpaceElement as _;
-use smithay::desktop::{PopupManager, Window};
-use smithay::output::{self, Output};
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::Resource as _;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size, Transform};
-use smithay::wayland::compositor::{remove_pre_commit_hook, with_states, HookId, SurfaceData};
-use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface};
-use wayland_backend::server::Credentials;
+use std::cell::{Cell, Ref, RefCell};  // 内部可变性容器
+use std::time::Duration;  // 时间间隔
 
-use super::{ResolvedWindowRules, WindowRef};
-use crate::handlers::KdeDecorationsModeState;
-use crate::layout::{
+use niri_config::{Color, CornerRadius, GradientInterpolation, WindowRule};  // 配置结构
+use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;  // 表面渲染
+use smithay::backend::renderer::element::Kind;  // 渲染元素类型
+use smithay::backend::renderer::gles::GlesRenderer;  // OpenGL渲染器
+use smithay::desktop::space::SpaceElement as _;  // 空间元素特性
+use smithay::desktop::{PopupManager, Window};  // 桌面窗口和弹出菜单管理
+use smithay::output::{self, Output};  // 输出设备
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;  // 顶层装饰协议
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;  // 顶层协议
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;  // Wayland表面
+use smithay::reexports::wayland_server::Resource as _;  // Wayland资源
+use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size, Transform};  // 实用工具
+use smithay::wayland::compositor::{remove_pre_commit_hook, with_states, HookId, SurfaceData};  // 提交钩子
+use smithay::wayland::seat::WaylandFocus;  // 焦点管理
+use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface};  // XDG shell
+use wayland_backend::server::Credentials;  // 进程凭证
+
+// 本地模块
+use super::{ResolvedWindowRules, WindowRef};  // 窗口规则和引用
+use crate::handlers::KdeDecorationsModeState;  // KDE装饰模式
+use crate::layout::{  // 布局相关
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
     LayoutElementRenderSnapshot,
 };
-use crate::niri_render_elements;
-use crate::render_helpers::border::BorderRenderElement;
-use crate::render_helpers::offscreen::OffscreenData;
-use crate::render_helpers::renderer::NiriRenderer;
-use crate::render_helpers::snapshot::RenderSnapshot;
-use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
-use crate::render_helpers::surface::render_snapshot_from_surface_tree;
-use crate::render_helpers::{BakedBuffer, RenderTarget, SplitElements};
-use crate::utils::id::IdCounter;
-use crate::utils::transaction::Transaction;
-use crate::utils::{
+use crate::niri_render_elements;  // 渲染元素宏
+use crate::render_helpers::border::BorderRenderElement;  // 边框渲染
+use crate::render_helpers::offscreen::OffscreenData;  // 离屏渲染数据
+use crate::render_helpers::renderer::NiriRenderer;  // 自定义渲染器
+use crate::render_helpers::snapshot::RenderSnapshot;  // 渲染快照
+use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};  // 纯色渲染
+use crate::render_helpers::surface::render_snapshot_from_surface_tree;  // 表面快照
+use crate::render_helpers::{BakedBuffer, RenderTarget, SplitElements};  // 渲染辅助
+use crate::utils::id::IdCounter;  // ID生成器
+use crate::utils::transaction::Transaction;  // 事务处理
+use crate::utils::{  // 实用函数
     get_credentials_for_surface, send_scale_transform, update_tiled_state, with_toplevel_role,
     ResizeEdge,
 };
 
+/// 已映射窗口结构体
+/// 包含窗口状态、渲染数据和交互逻辑
 #[derive(Debug)]
 pub struct Mapped {
+    /// 底层的Smithay窗口对象
     pub window: Window,
 
-    /// Unique ID of this `Mapped`.
+    /// 窗口的唯一ID
     id: MappedId,
 
-    /// Credentials of the process that created the Wayland connection.
+    /// 创建此窗口的进程凭证
     credentials: Option<Credentials>,
 
-    /// Pre-commit hook that we have on all mapped toplevel surfaces.
+    /// 预提交钩子ID（用于拦截提交事件）
     pre_commit_hook: HookId,
 
-    /// Up-to-date rules.
+    /// 当前应用的窗口规则
     rules: ResolvedWindowRules,
 
-    /// Whether the window rules need to be recomputed.
-    ///
-    /// This is not used in all cases; for example, app ID and title changes recompute the rules
-    /// immediately, rather than setting this flag.
+    /// 标记是否需要重新计算规则
     need_to_recompute_rules: bool,
 
-    /// Whether this window needs a configure this loop cycle.
-    ///
-    /// Certain Wayland requests require a configure in response, like un/fullscreen.
+    /// 标记是否需要发送配置事件
     needs_configure: bool,
 
-    /// Whether this window needs a frame callback.
-    ///
-    /// We set this after sending a configure to give invisible windows a chance to respond to
-    /// resizes immediately, without waiting for a 1 second throttled callback.
+    /// 标记是否需要帧回调
     needs_frame_callback: bool,
 
-    /// Data of the offscreen element rendered in place of this window.
-    ///
-    /// If `None`, then the window is not offscreened.
+    /// 离屏渲染数据（当窗口被移出屏幕时使用）
     offscreen_data: RefCell<Option<OffscreenData>>,
 
-    /// Whether this has an urgent indicator.
+    /// 窗口是否处于紧急状态（需要用户注意）
     is_urgent: bool,
 
-    /// Whether this window has the keyboard focus.
+    /// 窗口是否拥有键盘焦点
     is_focused: bool,
 
-    /// Whether this window is the active window in its column.
+    /// 在所在列中是否激活
     is_active_in_column: bool,
 
-    /// Whether this window is floating.
+    /// 是否为浮动窗口
     is_floating: bool,
 
-    /// Whether this window is a target of a window cast.
+    /// 是否为窗口投射目标
     is_window_cast_target: bool,
 
-    /// Whether this window should ignore opacity set through window rules.
+    /// 是否忽略不透明度规则
     ignore_opacity_window_rule: bool,
 
-    /// Buffer to draw instead of the window when it should be blocked out.
+    /// 屏蔽渲染时的纯色缓冲区
     block_out_buffer: RefCell<SolidColorBuffer>,
 
-    /// Whether the next configure should be animated, if the configured state changed.
+    /// 下次配置是否启用动画
     animate_next_configure: bool,
 
-    /// Serials of commits that should be animated.
+    /// 需要动画的提交序列号列表
     animate_serials: Vec<Serial>,
 
-    /// Snapshot right before an animated commit, without popups.
+    /// 动画前的渲染快照（不含弹出菜单）
     animation_snapshot: Option<LayoutElementRenderSnapshot>,
 
-    /// State for the logic to request a size once (for floating windows).
+    /// 一次性尺寸请求状态（用于浮动窗口）
     request_size_once: Option<RequestSizeOnce>,
 
-    /// Transaction that the next configure should take part in, if any.
+    /// 下次配置应参与的事务
     transaction_for_next_configure: Option<Transaction>,
 
-    /// Pending transactions that have not been added as blockers for this window yet.
+    /// 待处理的事务列表
     pending_transactions: Vec<(Serial, Transaction)>,
 
-    /// State of an ongoing interactive resize.
+    /// 交互式调整大小状态
     interactive_resize: Option<InteractiveResize>,
 
-    /// Last time interactive resize was started.
-    ///
-    /// Used for double-resize-click tracking.
+    /// 上次交互式调整开始时间（用于双击检测）
     last_interactive_resize_start: Cell<Option<(Duration, ResizeEdge)>>,
 
-    /// Whether this window is in windowed (fake) fullscreen.
-    ///
-    /// In this mode, the underlying window is told that it's fullscreen, while keeping it as
-    /// a regular, non-fullscreen tile.
+    /// 是否处于窗口化全屏模式（伪全屏）
     is_windowed_fullscreen: bool,
 
-    /// Whether this window is pending to go to windowed (fake) fullscreen.
-    ///
-    /// Several places in the layout code assume that is_fullscreen() can flip only on a commit.
-    /// Which is something that we do want to flip when changing is_windowed_fullscreen. Flipping
-    /// it right away would mean remembering to call layout.update_window() after any operation
-    /// that may change is_windowed_fullscreen, which is quite tricky and error-prone, especially
-    /// for deeply nested operations.
-    ///
-    /// It's also not clear what's the best way to go about it. Ideally we'd wait for configure ack
-    /// and commit before "committing" to is_windowed_fullscreen, however, since it's not real
-    /// Wayland state, we may end up with no Wayland state change to configure at all.
-    ///
-    /// For example: when the window is in real fullscreen, but its non-fullscreen size matches
-    /// its fullscreen size. Then turning on is_windowed_fullscreen will both keep the
-    /// fullscreen state, and keep the size (since it matches), resulting in no configure.
-    ///
-    /// So we work around this by emulating a configure-ack/commit cycle through
-    /// is_pending_windowed_fullscreen and uncommited_windowed_fullscreen. We ensure we send actual
-    /// configures in all cases through needs_configure. This can result in unnecessary configures
-    /// (like in the example above), but in most cases there will be a configure anyway to change
-    /// the Fullscreen state and/or the size. What this gives us is being able to synchronize our
-    /// windowed fullscreen state to the real window updates to avoid any flickering.
+    /// 是否等待进入窗口化全屏
     is_pending_windowed_fullscreen: bool,
 
-    /// Pending windowed fullscreen updates.
-    ///
-    /// These have been "sent" to the window in form of configures, but the window hadn't committed
-    /// in response yet.
+    /// 待提交的窗口化全屏状态列表
     uncommited_windowed_fullscreen: Vec<(Serial, bool)>,
 }
 
+// 定义渲染元素类型（用于窗口投射）
 niri_render_elements! {
     WindowCastRenderElements<R> => {
-        Layout = LayoutElementRenderElement<R>,
-        // Blocked-out window with rounded corners.
-        Border = BorderRenderElement,
+        Layout = LayoutElementRenderElement<R>,  // 布局元素
+        Border = BorderRenderElement,            // 带圆角的屏蔽窗口
     }
 }
 
+// 全局ID计数器
 static MAPPED_ID_COUNTER: IdCounter = IdCounter::new();
 
+/// 窗口唯一ID
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MappedId(u64);
 
 impl MappedId {
+    /// 生成下一个ID
     pub fn next() -> MappedId {
         MappedId(MAPPED_ID_COUNTER.next())
     }
 
+    /// 获取原始ID值
     pub fn get(self) -> u64 {
         self.0
     }
 }
 
-/// Interactive resize state.
+/// 交互式调整大小状态枚举
 #[derive(Debug)]
 enum InteractiveResize {
-    /// The resize is ongoing.
+    /// 调整进行中
     Ongoing(InteractiveResizeData),
-    /// The resize has stopped and we're waiting to send the last configure.
+    /// 等待发送最终配置
     WaitingForLastConfigure(InteractiveResizeData),
-    /// We had sent the last resize configure and are waiting for the corresponding commit.
+    /// 等待最终提交
     WaitingForLastCommit {
         data: InteractiveResizeData,
-        serial: Serial,
+        serial: Serial,  // 配置序列号
     },
 }
 
 impl InteractiveResize {
+    /// 获取调整数据
     fn data(&self) -> InteractiveResizeData {
         match self {
             InteractiveResize::Ongoing(data) => *data,
@@ -208,38 +182,43 @@ impl InteractiveResize {
     }
 }
 
-/// Request-size-once logic state.
+/// 一次性尺寸请求状态
 #[derive(Debug, Clone, Copy)]
 enum RequestSizeOnce {
-    /// Waiting for configure to be sent with the requested size.
+    /// 等待发送配置
     WaitingForConfigure,
-    /// Waiting for the window to commit in response to the configure.
-    WaitingForCommit(Serial),
-    /// When configuring, use the current window size.
+    /// 等待窗口提交
+    WaitingForCommit(Serial),  // 序列号
+    /// 使用窗口当前尺寸
     UseWindowSize,
 }
 
 impl Mapped {
+    // 创建新的已映射窗口
     pub fn new(window: Window, rules: ResolvedWindowRules, hook: HookId) -> Self {
+        // 获取窗口的Wayland表面
         let surface = window.wl_surface().expect("no X11 support");
+        // 获取创建此表面的进程凭证
         let credentials = get_credentials_for_surface(&surface);
 
+        // 初始化并返回Mapped实例
         Self {
             window,
-            id: MappedId::next(),
+            id: MappedId::next(),  // 生成唯一ID
             credentials,
-            pre_commit_hook: hook,
-            rules,
+            pre_commit_hook: hook,  // 保存预提交钩子
+            rules,  // 初始规则
             need_to_recompute_rules: false,
             needs_configure: false,
             needs_frame_callback: false,
-            offscreen_data: RefCell::new(None),
+            offscreen_data: RefCell::new(None),  // 无离屏数据
             is_urgent: false,
             is_focused: false,
-            is_active_in_column: true,
+            is_active_in_column: true,  // 默认在列中激活
             is_floating: false,
             is_window_cast_target: false,
             ignore_opacity_window_rule: false,
+            // 创建黑色屏蔽缓冲区
             block_out_buffer: RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.])),
             animate_next_configure: false,
             animate_serials: Vec::new(),
@@ -255,29 +234,31 @@ impl Mapped {
         }
     }
 
+    // 获取底层ToplevelSurface
     pub fn toplevel(&self) -> &ToplevelSurface {
         self.window.toplevel().expect("no X11 support")
     }
 
-    /// Recomputes the resolved window rules and returns whether they changed.
+    /// 重新计算窗口规则并返回是否更改
     pub fn recompute_window_rules(&mut self, rules: &[WindowRule], is_at_startup: bool) -> bool {
-        self.need_to_recompute_rules = false;
+        self.need_to_recompute_rules = false;  // 重置标志
 
+        // 计算新规则
         let new_rules = ResolvedWindowRules::compute(rules, WindowRef::Mapped(self), is_at_startup);
         if new_rules == self.rules {
-            return false;
+            return false;  // 无变化
         }
 
-        // If the opacity window rule no longer makes the window semitransparent, reset the ignore
-        // flag to reduce surprises down the line.
+        // 如果新规则不再设置半透明，重置忽略标志
         if !new_rules.opacity.is_some_and(|o| o < 1.) {
             self.ignore_opacity_window_rule = false;
         }
 
-        self.rules = new_rules;
-        true
+        self.rules = new_rules;  // 更新规则
+        true  // 规则已更改
     }
 
+    // 如果需要则重新计算规则
     pub fn recompute_window_rules_if_needed(
         &mut self,
         rules: &[WindowRule],
@@ -290,52 +271,63 @@ impl Mapped {
         self.recompute_window_rules(rules, is_at_startup)
     }
 
+    // 标记需要配置事件
     pub fn set_needs_configure(&mut self) {
         self.needs_configure = true;
     }
 
+    // 获取窗口ID
     pub fn id(&self) -> MappedId {
         self.id
     }
 
+    // 获取进程凭证
     pub fn credentials(&self) -> Option<&Credentials> {
         self.credentials.as_ref()
     }
 
+    // 获取离屏数据引用
     pub fn offscreen_data(&self) -> Ref<Option<OffscreenData>> {
         self.offscreen_data.borrow()
     }
 
+    // 检查是否聚焦
     pub fn is_focused(&self) -> bool {
         self.is_focused
     }
 
+    // 检查在列中是否激活
     pub fn is_active_in_column(&self) -> bool {
         self.is_active_in_column
     }
 
+    // 检查是否浮动
     pub fn is_floating(&self) -> bool {
         self.is_floating
     }
 
+    // 检查是否为投屏目标
     pub fn is_window_cast_target(&self) -> bool {
         self.is_window_cast_target
     }
 
+    // 切换忽略不透明度规则
     pub fn toggle_ignore_opacity_window_rule(&mut self) {
         self.ignore_opacity_window_rule = !self.ignore_opacity_window_rule;
     }
 
+    // 设置聚焦状态
     pub fn set_is_focused(&mut self, is_focused: bool) {
         if self.is_focused == is_focused {
             return;
         }
 
         self.is_focused = is_focused;
-        self.is_urgent = false;
-        self.need_to_recompute_rules = true;
+        self.is_urgent = false;  // 聚焦时清除紧急状态
+        self.need_to_recompute_rules = true;  // 标记需要重新计算规则
     }
 
+    // 设置投屏目标状态
     pub fn set_is_window_cast_target(&mut self, value: bool) {
         if self.is_window_cast_target == value {
             return;
@@ -345,12 +337,14 @@ impl Mapped {
         self.need_to_recompute_rules = true;
     }
 
-    /// Renders a snapshot of the window without popups.
+    /// 渲染不含弹出菜单的窗口快照
     fn render_snapshot(&self, renderer: &mut GlesRenderer) -> LayoutElementRenderSnapshot {
         let _span = tracy_client::span!("Mapped::render_snapshot");
 
+        // 获取窗口尺寸
         let size = self.size().to_f64();
 
+        // 准备屏蔽缓冲区
         let mut buffer = self.block_out_buffer.borrow_mut();
         buffer.resize(size);
         let blocked_out_contents = vec![BakedBuffer {
@@ -360,13 +354,15 @@ impl Mapped {
             dst: None,
         }];
 
+        // 计算缓冲区位置（考虑缩放）
         let buf_pos = self.window.geometry().loc.upscale(-1).to_f64();
 
+        // 渲染表面内容
         let mut contents = vec![];
-
         let surface = self.toplevel().wl_surface();
         render_snapshot_from_surface_tree(renderer, surface, buf_pos, &mut contents);
 
+        // 返回快照结构
         RenderSnapshot {
             contents,
             blocked_out_contents,
@@ -377,48 +373,35 @@ impl Mapped {
         }
     }
 
+    // 检查提交是否需要动画
     pub fn should_animate_commit(&mut self, commit_serial: Serial) -> bool {
         let mut should_animate = false;
+        // 保留需要动画的序列号
         self.animate_serials.retain_mut(|serial| {
             if commit_serial.is_no_older_than(serial) {
                 should_animate = true;
-                false
+                false  // 移除已处理的序列号
             } else {
-                true
+                true   // 保留未处理的序列号
             }
         });
         should_animate
     }
 
+    // 存储动画快照
     pub fn store_animation_snapshot(&mut self, renderer: &mut GlesRenderer) {
         self.animation_snapshot = Some(self.render_snapshot(renderer));
     }
 
+    // 获取待处理事务
     pub fn take_pending_transaction(&mut self, commit_serial: Serial) -> Option<Transaction> {
         let mut rv = None;
 
-        // Pending transactions are appended in order by serial, so we can loop from the start
-        // until we hit a serial that is too new.
+        // 按序列号顺序处理待处理事务
         while let Some((serial, _)) = self.pending_transactions.first() {
-            // In this loop, we will complete the transaction corresponding to the commit, as well
-            // as all transactions corresponding to previous serials. This can happen when we
-            // request resizes too quickly, and the surface only responds to the last one.
-            //
-            // Note that in this case, completing the previous transactions can result in an
-            // inconsistent visual state, if another window is waiting for this window to assume a
-            // specific size (in a previous transaction), which is now different (in this commit).
-            //
-            // However, there isn't really a good way to deal with that. We cannot cancel any
-            // transactions because we need to keep sending frame callbacks, and cancelling a
-            // transaction will make the corresponding frame callbacks get lost, and the window
-            // will hang.
-            //
-            // This is why resize throttling (implemented separately) is important: it prevents
-            // visually inconsistent states by way of never having more than one transaction in
-            // flight.
+            // 处理当前及更早的提交
             if commit_serial.is_no_older_than(serial) {
                 let (_, transaction) = self.pending_transactions.remove(0);
-                // Previous transaction is dropped here, signaling completion.
                 rv = Some(transaction);
             } else {
                 break;
@@ -428,19 +411,24 @@ impl Mapped {
         rv
     }
 
+    // 获取上次交互调整开始时间
     pub fn last_interactive_resize_start(&self) -> &Cell<Option<(Duration, ResizeEdge)>> {
         &self.last_interactive_resize_start
     }
 
+    /// 为屏幕投射渲染窗口
     pub fn render_for_screen_cast<R: NiriRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
     ) -> impl DoubleEndedIterator<Item = WindowCastRenderElements<R>> {
+        // 计算边界框（含弹出菜单）
         let bbox = self.window.bbox_with_popups().to_physical_precise_up(scale);
 
+        // 检查是否支持边框着色器
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         let rules = self.rules();
+        // 获取圆角半径（应用规则或默认）
         let radius = rules.geometry_corner_radius.unwrap_or_default();
         let window_size = self
             .size()
@@ -449,16 +437,15 @@ impl Mapped {
             .to_logical(scale);
         let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
 
+        // 计算渲染位置
         let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
+        // 渲染元素
         let elements = self.render(renderer, location, scale, 1., RenderTarget::Screencast);
 
+        // 转换元素为投屏格式
         elements.into_iter().map(move |elem| {
             if let LayoutElementRenderElement::SolidColor(elem) = &elem {
-                // In this branch we're rendering a blocked-out window with a solid color. We need
-                // to render it with a rounded corner shader even if clip_to_geometry is false,
-                // because in this case we're assuming that the unclipped window CSD already has
-                // corners rounded to the user-provided radius, so our blocked-out rendering should
-                // match that radius.
+                // 处理屏蔽渲染的圆角
                 if radius != CornerRadius::default() && has_border_shader {
                     let geo = elem.geo();
                     return BorderRenderElement::new(
@@ -479,10 +466,12 @@ impl Mapped {
                 }
             }
 
+            // 默认转换
             WindowCastRenderElements::from(elem)
         })
     }
 
+    /// 发送帧回调
     pub fn send_frame<T, F>(
         &mut self,
         output: &Output,
@@ -496,27 +485,32 @@ impl Mapped {
         let needs_frame_callback = self.needs_frame_callback;
         self.needs_frame_callback = false;
 
+        // 决定是否发送帧回调
         let should_send = move |surface: &WlSurface, states: &SurfaceData| {
-            // Let primary_scan_out_output() run its logic and update internal state.
+            // 检查主扫描输出
             if let Some(output) = primary_scan_out_output(surface, states) {
                 return Some(output);
             }
 
-            // Send unconditionally to all surfaces if the window needs a surface callback.
+            // 如果需要则发送给所有表面
             needs_frame_callback.then(|| output.clone())
         };
         self.window.send_frame(output, time, throttle, should_send);
     }
 
+    // 更新平铺状态
     pub fn update_tiled_state(&self, prefer_no_csd: bool) {
         update_tiled_state(self.toplevel(), prefer_no_csd, self.rules.tiled_state);
     }
 
+    // 检查是否窗口化全屏
     pub fn is_windowed_fullscreen(&self) -> bool {
         self.is_windowed_fullscreen
     }
 
+    // 设置紧急状态
     pub fn set_urgent(&mut self, urgent: bool) {
+        // 已聚焦窗口不能设为紧急
         if self.is_focused && urgent {
             return;
         }
@@ -526,33 +520,89 @@ impl Mapped {
         self.need_to_recompute_rules |= changed;
     }
 
+    // 检查是否紧急
     pub fn is_urgent(&self) -> bool {
         self.is_urgent
     }
 }
 
+// 析构函数实现
 impl Drop for Mapped {
     fn drop(&mut self) {
+        // 移除预提交钩子
         remove_pre_commit_hook(self.toplevel().wl_surface(), self.pre_commit_hook.clone());
     }
 }
 
+/* 关键功能详解
+1. 生命周期管理:
+   - new(): 创建窗口时初始化状态
+   - drop(): 销毁时移除Wayland钩子
+   - set_is_focused(): 更新焦点状态并重置紧急状态
+
+2. 规则系统:
+   - recompute_window_rules(): 动态更新规则
+   - toggle_ignore_opacity_window_rule(): 用户覆盖不透明度规则
+
+3. 渲染系统:
+   - render_snapshot(): 创建不含弹出菜单的快照
+   - render_for_screen_cast(): 为投屏优化渲染
+   - store_animation_snapshot(): 存储动画起始状态
+
+4. 事务管理:
+   - take_pending_transaction(): 处理异步事务
+   - send_frame(): 协调帧回调
+
+5. 状态同步:
+   - update_tiled_state(): 同步Wayland平铺状态
+   - set_urgent(): 管理紧急状态逻辑
+
+6. 窗口系统集成:
+   - toplevel(): 访问底层Wayland对象
+   - credentials(): 获取创建者进程信息
+
+设计模式:
+   - 状态机: interactive_resize管理调整大小流程
+   - 观察者模式: need_to_recompute_rules标记规则更新
+   - 快照模式: animation_snapshot保存动画起始状态
+   - 事务模式: pending_transactions处理异步操作
+
+性能考虑:
+   - 离屏渲染: offscreen_data避免不可见窗口的渲染
+   - 动画优化: animate_serials管理动画序列
+   - 资源复用: block_out_buffer重用屏蔽缓冲区
+*/
+
 impl LayoutElement for Mapped {
+    // 作用：为 Mapped 类型实现 LayoutElement trait，使其可作为布局元素参与合成器的布局和渲染流程
+    // 说明：LayoutElement 是合成器核心抽象，代表可布局渲染的窗口/元素
+    // Rust机制：trait 实现 - 为特定类型定义接口方法集合
     type Id = Window;
+    // 作用：定义布局元素的唯一标识类型为 Window
+    // 说明：用于在布局系统中唯一识别窗口实例
 
     fn id(&self) -> &Self::Id {
+        // 作用：返回窗口的标识符
         &self.window
     }
 
     fn size(&self) -> Size<i32, Logical> {
+        // 作用：获取窗口的当前逻辑尺寸
+        // 合成器逻辑：从窗口几何信息中提取尺寸用于布局计算
+        // 说明：Logical 表示逻辑坐标（独立于缩放）
         self.window.geometry().size
     }
 
     fn buf_loc(&self) -> Point<i32, Logical> {
+        // 作用：计算缓冲区原点相对于窗口位置的偏移
+        // 说明：用于将窗口坐标系转换为缓冲区坐标系
+        // Wayland协议：surface 有自己的坐标系系统
         Point::from((0, 0)) - self.window.geometry().loc
     }
 
     fn is_in_input_region(&self, point: Point<f64, Logical>) -> bool {
+        // 作用：检测输入事件坐标是否在窗口的输入区域内
+        // 合成器逻辑：将全局坐标转换为窗口本地坐标后检测
         let surface_local = point + self.window.geometry().loc.to_f64();
         self.window.is_in_input_region(&surface_local)
     }
@@ -565,21 +615,31 @@ impl LayoutElement for Mapped {
         alpha: f32,
         target: RenderTarget,
     ) -> SplitElements<LayoutElementRenderElement<R>> {
+        // 作用：渲染窗口及其所有弹出层
+        // 合成器逻辑：
+        //   [检测遮挡] → [渲染主窗口] → [收集所有弹出层]
+        //   ↓___________________________↑
         let mut rv = SplitElements::default();
 
+        // 检查是否需要遮挡渲染（如最小化状态）
         if target.should_block_out(self.rules.block_out_from) {
+            // 创建纯色遮挡缓冲区
             let mut buffer = self.block_out_buffer.borrow_mut();
             buffer.resize(self.window.geometry().size.to_f64());
             let elem =
                 SolidColorRenderElement::from_buffer(&buffer, location, alpha, Kind::Unspecified);
             rv.normal.push(elem.into());
         } else {
+            // 计算缓冲区渲染位置
             let buf_pos = location - self.window.geometry().loc.to_f64();
 
+            // 获取主 surface
             let surface = self.toplevel().wl_surface();
+            // 渲染所有关联的弹出层
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+                 // 计算弹出层位置偏移
                 let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
-
+                // 递归渲染弹出层树
                 rv.popups.extend(render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
@@ -589,7 +649,7 @@ impl LayoutElement for Mapped {
                     Kind::Unspecified,
                 ));
             }
-
+            // 渲染主窗口 surface 树
             rv.normal = render_elements_from_surface_tree(
                 renderer,
                 surface,
@@ -670,7 +730,14 @@ impl LayoutElement for Mapped {
         animate: bool,
         transaction: Option<Transaction>,
     ) {
-        // Going into real fullscreen resets windowed fullscreen.
+
+        // 作用：请求窗口调整到指定尺寸
+        // 合成器逻辑：处理全屏状态转换 → 更新待处理状态 → 记录动画需求
+        // 流程图：
+        //   [全屏状态处理] → [更新配置状态] → [记录动画标记] → [保存事务]
+        //        ↓_____________________________↑
+
+        // 处理全屏状态转换
         if is_fullscreen {
             self.is_pending_windowed_fullscreen = false;
 
@@ -681,6 +748,7 @@ impl LayoutElement for Mapped {
             }
         }
 
+        // 更新 toplevel 的待处理状态
         let changed = self.toplevel().with_pending_state(|state| {
             let changed = state.size != Some(size);
             state.size = Some(size);
@@ -692,6 +760,8 @@ impl LayoutElement for Mapped {
             changed
         });
 
+
+        // 记录是否需要动画
         if changed && animate {
             self.animate_next_configure = true;
         }
@@ -703,6 +773,7 @@ impl LayoutElement for Mapped {
         // windows 2 and 3, and we want all windows 1, 2 and 3 to use the last transaction, rather
         // than window 1 getting stuck with the previous transaction that is immediately released
         // by 2.
+        // 保存事务（用于多窗口协同调整）
         if let Some(transaction) = transaction {
             self.transaction_for_next_configure = Some(transaction);
         }
@@ -1238,3 +1309,41 @@ impl LayoutElement for Mapped {
             });
     }
 }
+
+/* 已映射窗口关键功能说明
+1. 状态管理:
+   - 焦点状态 (is_focused)
+   - 浮动状态 (is_floating)
+   - 紧急状态 (is_urgent)
+   - 全屏模拟 (is_windowed_fullscreen)
+
+2. 渲染控制:
+   - 离屏渲染 (offscreen_data)
+   - 动画快照 (animation_snapshot)
+   - 屏蔽渲染 (block_out_buffer)
+
+3. 交互处理:
+   - 交互式调整大小 (interactive_resize)
+   - 事务管理 (pending_transactions)
+   - 尺寸请求 (request_size_once)
+
+4. 规则应用:
+   - 动态规则更新 (need_to_recompute_rules)
+   - 规则覆盖 (ignore_opacity_window_rule)
+
+5. 生命周期:
+   - 预提交钩子 (pre_commit_hook)
+   - 配置管理 (needs_configure)
+   - 进程凭证 (credentials)
+
+6. 窗口投射:
+   - 特殊渲染路径 (WindowCastRenderElements)
+
+工作流程:
+  1. 窗口创建: 初始化状态，设置预提交钩子
+  2. 规则应用: 根据匹配规则设置初始状态
+  3. 用户交互: 处理调整大小、焦点变化等
+  4. 渲染准备: 生成渲染元素，处理动画
+  5. 提交处理: 通过钩子拦截提交，更新状态
+  6. 事务协调: 管理异步操作，确保一致性
+*/

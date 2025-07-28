@@ -1,3 +1,7 @@
+//handlers/mod.rs 是 Niri 合成器的核心事件处理模块，它实现了 30+
+//  个 Wayland 协议处理器，覆盖了从基础输入/输出到高级功能（如屏幕截
+// 图、DRM 租约、会话锁定等）的完整协议支持。这个文件是合成器与 Wayland 协议交互的神经中枢。
+
 mod compositor;
 mod layer_shell;
 mod xdg_shell;

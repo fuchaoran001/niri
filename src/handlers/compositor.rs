@@ -1,3 +1,7 @@
+// 文件: handlers/compositor.rs
+// 作用: 处理Wayland compositor协议相关事件，管理表面生命周期和缓冲区提交
+// Wayland概念: compositor - 核心协议，管理表面创建、销毁和内容提交
+// Rust概念: trait实现 - 为State类型实现CompositorHandler等协议处理trait
 use std::collections::hash_map::Entry;
 
 use niri_ipc::PositionChange;
@@ -26,6 +30,8 @@ use crate::utils::transaction::Transaction;
 use crate::utils::{is_mapped, send_scale_transform};
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped};
 
+// 实现CompositorHandler trait
+// 作用: 处理compositor协议的核心回调
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.niri.compositor_state
@@ -450,20 +456,29 @@ impl CompositorHandler for State {
     }
 }
 
+// 实现BufferHandler trait
+// 作用: 处理缓冲区相关事件
 impl BufferHandler for State {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
 }
 
+// 实现ShmHandler trait
+// 作用: 处理共享内存相关事件
 impl ShmHandler for State {
     fn shm_state(&self) -> &ShmState {
         &self.niri.shm_state
     }
 }
 
+// 委托宏: 将compositor和shm协议处理委托给State
 delegate_compositor!(State);
 delegate_shm!(State);
 
+// State的扩展实现
 impl State {
+    // 函数: add_default_dmabuf_pre_commit_hook
+    // 作用: 添加默认的dmabuf预提交钩子
+    // Wayland概念: dmabuf - 直接内存访问缓冲区，用于高效传递图形数据
     pub fn add_default_dmabuf_pre_commit_hook(&mut self, surface: &WlSurface) {
         let hook = add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
             let maybe_dmabuf = with_states(surface, |surface_data| {
@@ -508,6 +523,8 @@ impl State {
         }
     }
 
+    // 函数: remove_default_dmabuf_pre_commit_hook
+    // 作用: 移除默认的dmabuf预提交钩子
     pub fn remove_default_dmabuf_pre_commit_hook(&mut self, surface: &WlSurface) {
         if let Some(hook) = self.niri.dmabuf_pre_commit_hook.remove(surface) {
             remove_pre_commit_hook(surface, hook);

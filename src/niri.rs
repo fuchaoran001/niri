@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, mem, thread};
+use std::{env, mem, thread};  
 
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
 use anyhow::{bail, ensure, Context};
@@ -108,7 +108,7 @@ use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
-use smithay::wayland::xdg_foreign::XdgForeignState;
+use smithay::wayland::xdg_foreign::XdgForeignState;  
 
 use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
@@ -167,88 +167,88 @@ use crate::utils::{
     write_png_rgba8,
 };
 use crate::window::mapped::MappedId;
-use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
+use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};  
 
-const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
+const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];  
 
 // We'll try to send frame callbacks at least once a second. We'll make a timer that fires once a
 // second, so with the worst timing the maximum interval between two frame callbacks for a surface
 // should be ~1.995 seconds.
-const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
+const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));  
 
 pub struct Niri {
-    pub config: Rc<RefCell<Config>>,
+    pub config: Rc<RefCell<Config>>,  
 
     /// Output config from the config file.
     ///
     /// This does not include transient output config changes done via IPC. It is only used when
     /// reloading the config from disk to determine if the output configuration should be reloaded
     /// (and transient changes dropped).
-    pub config_file_output_config: niri_config::Outputs,
+    pub config_file_output_config: niri_config::Outputs,  
 
     pub event_loop: LoopHandle<'static, State>,
     pub scheduler: Scheduler<()>,
     pub stop_signal: LoopSignal,
-    pub display_handle: DisplayHandle,
+    pub display_handle: DisplayHandle,  
 
     /// Name of the Wayland socket.
     ///
     /// This is `None` when creating `Niri` without a Wayland socket.
-    pub socket_name: Option<OsString>,
+    pub socket_name: Option<OsString>,  
 
-    pub start_time: Instant,
+    pub start_time: Instant,  
 
     /// Whether the at-startup=true window rules are active.
-    pub is_at_startup: bool,
+    pub is_at_startup: bool,  
 
     /// Clock for driving animations.
-    pub clock: Clock,
+    pub clock: Clock,  
 
     // Each workspace corresponds to a Space. Each workspace generally has one Output mapped to it,
     // however it may have none (when there are no outputs connected) or multiple (when mirroring).
-    pub layout: Layout<Mapped>,
+    pub layout: Layout<Mapped>,  
 
     // This space does not actually contain any windows, but all outputs are mapped into it
     // according to their global position.
-    pub global_space: Space<Window>,
+    pub global_space: Space<Window>,  
 
     /// Mapped outputs, sorted by their name and position.
-    pub sorted_outputs: Vec<Output>,
+    pub sorted_outputs: Vec<Output>,  
 
     // Windows which don't have a buffer attached yet.
-    pub unmapped_windows: HashMap<WlSurface, Unmapped>,
+    pub unmapped_windows: HashMap<WlSurface, Unmapped>,  
 
     /// Layer surfaces which don't have a buffer attached yet.
-    pub unmapped_layer_surfaces: HashSet<WlSurface>,
+    pub unmapped_layer_surfaces: HashSet<WlSurface>,  
 
     /// Extra data for mapped layer surfaces.
-    pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
+    pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,  
 
     // Cached root surface for every surface, so that we can access it in destroyed() where the
     // normal get_parent() is cleared out.
-    pub root_surface: HashMap<WlSurface, WlSurface>,
+    pub root_surface: HashMap<WlSurface, WlSurface>,  
 
     // Dmabuf readiness pre-commit hook for a surface.
-    pub dmabuf_pre_commit_hook: HashMap<WlSurface, HookId>,
+    pub dmabuf_pre_commit_hook: HashMap<WlSurface, HookId>,  
 
     /// Clients to notify about their blockers being cleared.
     pub blocker_cleared_tx: Sender<Client>,
-    pub blocker_cleared_rx: Receiver<Client>,
+    pub blocker_cleared_rx: Receiver<Client>,  
 
-    pub output_state: HashMap<Output, OutputState>,
+    pub output_state: HashMap<Output, OutputState>,  
 
     // When false, we're idling with monitors powered off.
-    pub monitors_active: bool,
+    pub monitors_active: bool,  
 
     /// Whether the laptop lid is closed.
     ///
     /// Libinput guarantees that the lid switch starts in open state, and if it was closed during
     /// startup, libinput will immediately send a closed event.
-    pub is_lid_closed: bool,
+    pub is_lid_closed: bool,  
 
     pub devices: HashSet<input::Device>,
     pub tablets: HashMap<input::Device, TabletData>,
-    pub touch: HashSet<input::Device>,
+    pub touch: HashSet<input::Device>,  
 
     // Smithay state.
     pub compositor_state: CompositorState,
@@ -288,7 +288,7 @@ pub struct Niri {
     pub security_context_state: SecurityContextState,
     pub gamma_control_manager_state: GammaControlManagerState,
     pub activation_state: XdgActivationState,
-    pub mutter_x11_interop_state: MutterX11InteropManagerState,
+    pub mutter_x11_interop_state: MutterX11InteropManagerState,  
 
     // This will not work as is outside of tests, so it is gated with #[cfg(test)] for now. In
     // particular, shaders will need to learn about the single pixel buffer. Also, it must be
@@ -297,7 +297,7 @@ pub struct Niri {
     //
     // https://github.com/YaLTeR/niri/issues/619
     #[cfg(test)]
-    pub single_pixel_buffer_state: SinglePixelBufferState,
+    pub single_pixel_buffer_state: SinglePixelBufferState,  
 
     pub seat: Seat<State>,
     /// Scancodes of the keys to suppress.
@@ -311,7 +311,7 @@ pub struct Niri {
     pub previously_focused_window: Option<Window>,
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub is_fdo_idle_inhibited: Arc<AtomicBool>,
-    pub keyboard_shortcuts_inhibiting_surfaces: HashMap<WlSurface, KeyboardShortcutsInhibitor>,
+    pub keyboard_shortcuts_inhibiting_surfaces: HashMap<WlSurface, KeyboardShortcutsInhibitor>,  
 
     pub cursor_manager: CursorManager,
     pub cursor_texture_cache: CursorTextureCache,
@@ -353,43 +353,43 @@ pub struct Niri {
     pub mods_with_wheel_binds: HashSet<Modifiers>,
     pub vertical_finger_scroll_tracker: ScrollTracker,
     pub horizontal_finger_scroll_tracker: ScrollTracker,
-    pub mods_with_finger_scroll_binds: HashSet<Modifiers>,
+    pub mods_with_finger_scroll_binds: HashSet<Modifiers>,  
 
-    pub lock_state: LockState,
+    pub lock_state: LockState,  
 
     pub screenshot_ui: ScreenshotUi,
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
-    pub exit_confirm_dialog: Option<ExitConfirmDialog>,
+    pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
 
     pub pick_window: Option<async_channel::Sender<Option<MappedId>>>,
-    pub pick_color: Option<async_channel::Sender<Option<niri_ipc::PickedColor>>>,
+    pub pick_color: Option<async_channel::Sender<Option<niri_ipc::PickedColor>>>,  
 
     pub debug_draw_opaque_regions: bool,
-    pub debug_draw_damage: bool,
+    pub debug_draw_damage: bool,  
 
     #[cfg(feature = "dbus")]
     pub dbus: Option<crate::dbus::DBusServers>,
     #[cfg(feature = "dbus")]
-    pub inhibit_power_key_fd: Option<zbus::zvariant::OwnedFd>,
+    pub inhibit_power_key_fd: Option<zbus::zvariant::OwnedFd>,  
 
     pub ipc_server: Option<IpcServer>,
-    pub ipc_outputs_changed: bool,
+    pub ipc_outputs_changed: bool,  
 
     // Casts are dropped before PipeWire to prevent a double-free (yay).
     pub casts: Vec<Cast>,
     pub pipewire: Option<PipeWire>,
     #[cfg(feature = "xdp-gnome-screencast")]
-    pub pw_to_niri: calloop::channel::Sender<PwToNiri>,
+    pub pw_to_niri: calloop::channel::Sender<PwToNiri>,  
 
     // Screencast output for each mapped window.
     #[cfg(feature = "xdp-gnome-screencast")]
-    pub mapped_cast_output: HashMap<Window, Output>,
+    pub mapped_cast_output: HashMap<Window, Output>,  
 
     /// Window ID for the "dynamic cast" special window for the xdp-gnome picker.
     #[cfg(feature = "xdp-gnome-screencast")]
     pub dynamic_cast_id_for_portal: MappedId,
-}
+}  
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerVisibility {
@@ -405,19 +405,19 @@ pub enum PointerVisibility {
     /// Corresponds to a fully disabled pointer, for example after a touchscreen input, or after
     /// the pointer contents changed in a Hidden state.
     Disabled,
-}
+}  
 
 impl PointerVisibility {
     pub fn is_visible(&self) -> bool {
         matches!(self, Self::Visible)
     }
-}
+}  
 
 #[derive(Debug)]
 pub struct DndIcon {
     pub surface: WlSurface,
     pub offset: Point<i32, Logical>,
-}
+}  
 
 pub struct OutputState {
     pub global: GlobalId,
@@ -458,7 +458,7 @@ pub struct OutputState {
     screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
-}
+}  
 
 #[derive(Debug, Default)]
 pub enum RedrawState {
@@ -473,13 +473,13 @@ pub enum RedrawState {
     WaitingForEstimatedVBlank(RegistrationToken),
     /// A redraw is queued on top of the above.
     WaitingForEstimatedVBlankAndQueued(RegistrationToken),
-}
+}  
 
 pub struct PopupGrabState {
     pub root: WlSurface,
     pub grab: PopupGrab<State>,
     pub has_keyboard_grab: bool,
-}
+}  
 
 // The surfaces here are always toplevel surfaces focused as far as niri's logic is concerned, even
 // when popup grabs are active (which means the real keyboard focus is on a popup descending from
@@ -492,7 +492,7 @@ pub enum KeyboardFocus {
     LockScreen { surface: Option<WlSurface> },
     ScreenshotUi,
     Overview,
-}
+}  
 
 #[derive(Default, Clone, PartialEq)]
 pub struct PointContents {
@@ -507,7 +507,7 @@ pub struct PointContents {
     pub window: Option<(Window, HitType)>,
     // If surface belongs to a layer surface, this is that layer surface.
     pub layer: Option<LayerSurface>,
-}
+}  
 
 #[derive(Debug, Default)]
 pub enum LockState {
@@ -519,7 +519,7 @@ pub enum LockState {
     },
     Locking(SessionLocker),
     Locked(ExtSessionLockV1),
-}
+}  
 
 #[derive(PartialEq, Eq)]
 pub enum LockRenderState {
@@ -527,7 +527,7 @@ pub enum LockRenderState {
     Unlocked,
     /// The output displays a locked frame.
     Locked,
-}
+}  
 
 // Not related to the one in Smithay.
 //
@@ -535,14 +535,14 @@ pub enum LockRenderState {
 struct SurfaceFrameThrottlingState {
     /// Output and sequence that the frame callback was last sent at.
     last_sent_at: RefCell<Option<(Output, u32)>>,
-}
+}  
 
 pub enum CenterCoords {
     Separately,
     Both,
     // Force centering even if the cursor is already in the rectangle.
     BothAlways,
-}
+}  
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum CastTarget {
@@ -550,7 +550,7 @@ pub enum CastTarget {
     Nothing,
     Output(WeakOutput),
     Window { id: u64 },
-}
+}  
 
 impl RedrawState {
     fn queue_redraw(self) -> Self {
@@ -558,12 +558,12 @@ impl RedrawState {
             RedrawState::Idle => RedrawState::Queued,
             RedrawState::WaitingForEstimatedVBlank(token) => {
                 RedrawState::WaitingForEstimatedVBlankAndQueued(token)
-            }
+            }  
 
             // A redraw is already queued.
             value @ (RedrawState::Queued | RedrawState::WaitingForEstimatedVBlankAndQueued(_)) => {
                 value
-            }
+            }  
 
             // We're waiting for VBlank, request a redraw afterwards.
             RedrawState::WaitingForVBlank { .. } => RedrawState::WaitingForVBlank {
@@ -571,7 +571,7 @@ impl RedrawState {
             },
         }
     }
-}
+}  
 
 impl Default for SurfaceFrameThrottlingState {
     fn default() -> Self {
@@ -579,7 +579,7 @@ impl Default for SurfaceFrameThrottlingState {
             last_sent_at: RefCell::new(None),
         }
     }
-}
+}  
 
 impl KeyboardFocus {
     pub fn surface(&self) -> Option<&WlSurface> {
@@ -590,7 +590,7 @@ impl KeyboardFocus {
             KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::Overview => None,
         }
-    }
+    }  
 
     pub fn into_surface(self) -> Option<WlSurface> {
         match self {
@@ -600,21 +600,21 @@ impl KeyboardFocus {
             KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::Overview => None,
         }
-    }
+    }  
 
     pub fn is_layout(&self) -> bool {
         matches!(self, KeyboardFocus::Layout { .. })
-    }
+    }  
 
     pub fn is_overview(&self) -> bool {
         matches!(self, KeyboardFocus::Overview)
     }
-}
+}  
 
 pub struct State {
     pub backend: Backend,
     pub niri: Niri,
-}
+}  
 
 impl State {
     pub fn new(
@@ -625,13 +625,13 @@ impl State {
         headless: bool,
         create_wayland_socket: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let _span = tracy_client::span!("State::new");
+        let _span = tracy_client::span!("State::new");  
 
-        let config = Rc::new(RefCell::new(config));
+        let config = Rc::new(RefCell::new(config));  
 
         let has_display = env::var_os("WAYLAND_DISPLAY").is_some()
             || env::var_os("WAYLAND_SOCKET").is_some()
-            || env::var_os("DISPLAY").is_some();
+            || env::var_os("DISPLAY").is_some();  
 
         let mut backend = if headless {
             let headless = Headless::new();
@@ -643,7 +643,7 @@ impl State {
             let tty = Tty::new(config.clone(), event_loop.clone())
                 .context("error initializing the TTY backend")?;
             Backend::Tty(tty)
-        };
+        };  
 
         let mut niri = Niri::new(
             config.clone(),
@@ -653,82 +653,82 @@ impl State {
             &backend,
             create_wayland_socket,
         );
-        backend.init(&mut niri);
+        backend.init(&mut niri);  
 
-        let mut state = Self { backend, niri };
+        let mut state = Self { backend, niri };  
 
         // Load the xkb_file config option if set by the user.
         state.load_xkb_file();
         // Initialize some IPC server state.
         state.ipc_keyboard_layouts_changed();
         // Focus the default monitor if set by the user.
-        state.focus_default_monitor();
+        state.focus_default_monitor();  
 
         Ok(state)
-    }
+    }  
 
     pub fn refresh_and_flush_clients(&mut self) {
-        let _span = tracy_client::span!("State::refresh_and_flush_clients");
+        let _span = tracy_client::span!("State::refresh_and_flush_clients");  
 
-        self.refresh();
+        self.refresh();  
 
         // Advance animations to the current time (not target render time) before rendering outputs
         // in order to clear completed animations and render elements. Even if we're not rendering,
         // it's good to advance every now and then so the workspace clean-up and animations don't
         // build up (the 1 second frame callback timer will call this line).
-        self.niri.advance_animations();
+        self.niri.advance_animations();  
 
-        self.niri.redraw_queued_outputs(&mut self.backend);
+        self.niri.redraw_queued_outputs(&mut self.backend);  
 
         {
             let _span = tracy_client::span!("flush_clients");
             self.niri.display_handle.flush_clients().unwrap();
-        }
+        }  
 
         // Clear the time so it's fetched afresh next iteration.
         self.niri.clock.clear();
         self.niri.pointer_inactivity_timer_got_reset = false;
         self.niri.notified_activity_this_iteration = false;
-    }
+    }  
 
     fn refresh(&mut self) {
-        let _span = tracy_client::span!("State::refresh");
+        let _span = tracy_client::span!("State::refresh");  
 
         // Handle commits for surfaces whose blockers cleared this cycle. This should happen before
         // layout.refresh() since this is where these surfaces handle commits.
-        self.notify_blocker_cleared();
+        self.notify_blocker_cleared();  
 
         // These should be called periodically, before flushing the clients.
         self.niri.popups.cleanup();
         self.refresh_popup_grab();
-        self.update_keyboard_focus();
+        self.update_keyboard_focus();  
 
         // Should be called before refresh_layout() because that one will refresh other window
         // states and then send a pending configure.
-        self.niri.refresh_window_states();
+        self.niri.refresh_window_states();  
 
         // Needs to be called after updating the keyboard focus.
-        self.niri.refresh_layout();
+        self.niri.refresh_layout();  
 
         self.niri.cursor_manager.check_cursor_image_surface_alive();
         self.niri.refresh_pointer_outputs();
         self.niri.global_space.refresh();
         self.niri.refresh_idle_inhibit();
         self.refresh_pointer_contents();
-        foreign_toplevel::refresh(self);
+        foreign_toplevel::refresh(self);  
 
         #[cfg(feature = "xdp-gnome-screencast")]
         self.niri.refresh_mapped_cast_outputs();
         // Should happen before refresh_window_rules(), but after anything that can start or stop
         // screencasts.
         #[cfg(feature = "xdp-gnome-screencast")]
-        self.niri.refresh_mapped_cast_window_rules();
+        self.niri.refresh_mapped_cast_window_rules();  
 
         self.niri.refresh_window_rules();
         self.refresh_ipc_outputs();
         self.ipc_refresh_layout();
         self.ipc_refresh_keyboard_layout_index();
-    }
+    }  
 
     fn notify_blocker_cleared(&mut self) {
         let dh = self.niri.display_handle.clone();
@@ -737,25 +737,25 @@ impl State {
             self.client_compositor_state(&client)
                 .blocker_cleared(self, &dh);
         }
-    }
+    }  
 
     pub fn move_cursor(&mut self, location: Point<f64, Logical>) {
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
-        };
+        };  
 
         // Disable the hidden pointer if the contents underneath have changed.
         if !self.niri.pointer_visibility.is_visible() && self.niri.pointer_contents != under {
-            self.niri.pointer_visibility = PointerVisibility::Disabled;
+            self.niri.pointer_visibility = PointerVisibility::Disabled;  
 
             // When setting PointerVisibility::Hidden together with pointer contents changing,
             // we can change straight to nothing to avoid one frame of hover. Notably, this can
             // be triggered through warp-mouse-to-focus combined with hide-when-typing.
             under = PointContents::default();
-        }
+        }  
 
-        self.niri.pointer_contents.clone_from(&under);
+        self.niri.pointer_contents.clone_from(&under);  
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
         pointer.motion(
@@ -767,22 +767,22 @@ impl State {
                 time: get_monotonic_time().as_millis() as u32,
             },
         );
-        pointer.frame(self);
+        pointer.frame(self);  
 
-        self.niri.maybe_activate_pointer_constraint();
+        self.niri.maybe_activate_pointer_constraint();  
 
-        // We do not show the pointer on programmatic or keyboard movement.
+        // We do not show the pointer on programmatic or keyboard movement.  
 
         // FIXME: granular
         self.niri.queue_redraw_all();
-    }
+    }  
 
     /// Moves cursor within the specified rectangle, only adjusting coordinates if needed.
     fn move_cursor_to_rect(&mut self, rect: Rectangle<f64, Logical>, mode: CenterCoords) -> bool {
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let cur_loc = pointer.current_location();
         let x_in_bound = cur_loc.x >= rect.loc.x && cur_loc.x <= rect.loc.x + rect.size.w;
-        let y_in_bound = cur_loc.y >= rect.loc.y && cur_loc.y <= rect.loc.y + rect.size.h;
+        let y_in_bound = cur_loc.y >= rect.loc.y && cur_loc.y <= rect.loc.y + rect.size.h;  
 
         let p = match mode {
             CenterCoords::Separately => {
@@ -808,45 +808,45 @@ impl State {
                 }
             }
             CenterCoords::BothAlways => center_f64(rect),
-        };
+        };  
 
         self.move_cursor(p);
         true
-    }
+    }  
 
     pub fn move_cursor_to_focused_tile(&mut self, mode: CenterCoords) -> bool {
         if !self.niri.keyboard_focus.is_layout() {
             return false;
-        }
+        }  
 
         if self.niri.tablet_cursor_location.is_some() {
             return false;
-        }
+        }  
 
         let Some(output) = self.niri.layout.active_output() else {
             return false;
         };
-        let monitor = self.niri.layout.monitor_for_output(output).unwrap();
+        let monitor = self.niri.layout.monitor_for_output(output).unwrap();  
 
         let mut rv = false;
-        let rect = monitor.active_tile_visual_rectangle();
+        let rect = monitor.active_tile_visual_rectangle();  
 
         if let Some(rect) = rect {
             let output_geo = self.niri.global_space.output_geometry(output).unwrap();
             let mut rect = rect;
             rect.loc += output_geo.loc.to_f64();
             rv = self.move_cursor_to_rect(rect, mode);
-        }
+        }  
 
         rv
-    }
+    }  
 
     pub fn focus_default_monitor(&mut self) {
         // Our default target is the first output in sorted order.
         let Some(mut target) = self.niri.sorted_outputs.first().cloned() else {
             // No outputs are connected.
             return;
-        };
+        };  
 
         let config = self.niri.config.borrow();
         for config in &config.outputs.0 {
@@ -858,18 +858,18 @@ impl State {
                 break;
             }
         }
-        drop(config);
+        drop(config);  
 
         self.niri.layout.focus_output(&target);
         self.move_cursor_to_output(&target);
-    }
+    }  
 
     /// Focus a specific window, taking care of a potential active output change and cursor
     /// warp.
     pub fn focus_window(&mut self, window: &Window) {
-        let active_output = self.niri.layout.active_output().cloned();
+        let active_output = self.niri.layout.active_output().cloned();  
 
-        self.niri.layout.activate_window(window);
+        self.niri.layout.activate_window(window);  
 
         let new_active = self.niri.layout.active_output().cloned();
         #[allow(clippy::collapsible_if)]
@@ -879,11 +879,11 @@ impl State {
             }
         } else {
             self.maybe_warp_cursor_to_focus();
-        }
+        }  
 
         // FIXME: granular
         self.niri.queue_redraw_all();
-    }
+    }  
 
     pub fn maybe_warp_cursor_to_focus(&mut self) -> bool {
         let focused = match self.niri.config.borrow().input.warp_mouse_to_focus {
@@ -895,7 +895,7 @@ impl State {
             },
         };
         self.move_cursor_to_focused_tile(focused)
-    }
+    }  
 
     pub fn maybe_warp_cursor_to_focus_centered(&mut self) -> bool {
         let focused = match self.niri.config.borrow().input.warp_mouse_to_focus {
@@ -907,13 +907,13 @@ impl State {
             },
         };
         self.move_cursor_to_focused_tile(focused)
-    }
+    }  
 
     pub fn refresh_pointer_contents(&mut self) {
-        let _span = tracy_client::span!("Niri::refresh_pointer_contents");
+        let _span = tracy_client::span!("Niri::refresh_pointer_contents");  
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
-        let location = pointer.current_location();
+        let location = pointer.current_location();  
 
         if !self.niri.is_locked() && !self.niri.screenshot_ui.is_open() {
             // Don't refresh cursor focus during transitions.
@@ -923,40 +923,40 @@ impl State {
                     return;
                 }
             }
-        }
+        }  
 
         if !self.update_pointer_contents() {
             return;
-        }
+        }  
 
-        pointer.frame(self);
+        pointer.frame(self);  
 
         // Pointer motion from a surface to nothing triggers a cursor change to default, which
-        // means we may need to redraw.
+        // means we may need to redraw.  
 
         // FIXME: granular
         self.niri.queue_redraw_all();
-    }
+    }  
 
     pub fn update_pointer_contents(&mut self) -> bool {
-        let _span = tracy_client::span!("Niri::update_pointer_contents");
+        let _span = tracy_client::span!("Niri::update_pointer_contents");  
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
             _ => self.niri.contents_under(location),
-        };
+        };  
 
         // We're not changing the global cursor location here, so if the contents did not change,
         // then nothing changed.
         if self.niri.pointer_contents == under {
             return false;
-        }
+        }  
 
         // Disable the hidden pointer if the contents underneath have changed.
         if !self.niri.pointer_visibility.is_visible() {
-            self.niri.pointer_visibility = PointerVisibility::Disabled;
+            self.niri.pointer_visibility = PointerVisibility::Disabled;  
 
             // When setting PointerVisibility::Hidden together with pointer contents changing,
             // we can change straight to nothing to avoid one frame of hover. Notably, this can
@@ -965,9 +965,9 @@ impl State {
             if self.niri.pointer_contents == under {
                 return false;
             }
-        }
+        }  
 
-        self.niri.pointer_contents.clone_from(&under);
+        self.niri.pointer_contents.clone_from(&under);  
 
         pointer.motion(
             self,
@@ -977,9 +977,9 @@ impl State {
                 serial: SERIAL_COUNTER.next_serial(),
                 time: get_monotonic_time().as_millis() as u32,
             },
-        );
+        );  
 
-        self.niri.maybe_activate_pointer_constraint();
+        self.niri.maybe_activate_pointer_constraint();  
 
         true
     }

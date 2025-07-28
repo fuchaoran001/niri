@@ -1,23 +1,30 @@
-use std::cell::RefCell;
-use std::cmp::max;
-use std::collections::HashMap;
-use std::iter::zip;
-use std::rc::Rc;
+// 文件: ui/hotkey_overlay.rs
+// 作用: 热键覆盖层UI组件，显示重要热键绑定帮助信息
+// 关键概念:
+//   - 热键绑定解析: 将配置的键位映射转换为可读格式
+//   - 多输出支持: 为不同显示器缓存渲染结果
+//   - 动态内容生成: 根据当前配置生成热键列表
 
-use niri_config::{Action, Bind, Config, Key, ModKey, Modifiers, Trigger};
-use pangocairo::cairo::{self, ImageSurface};
-use pangocairo::pango::{AttrColor, AttrInt, AttrList, AttrString, FontDescription, Weight};
-use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
-use smithay::input::keyboard::xkb::keysym_get_name;
-use smithay::output::{Output, WeakOutput};
-use smithay::reexports::gbm::Format as Fourcc;
-use smithay::utils::{Scale, Transform};
+use std::cell::RefCell;  // Rust概念: 内部可变性容器(单线程)
+use std::cmp::max;       // Rust标准库: 最大值比较
+use std::collections::HashMap;  // Rust标准库: 键值对集合
+use std::iter::zip;      // Rust标准库: 并行迭代器
+use std::rc::Rc;         // Rust概念: 引用计数智能指针
 
-use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
-use crate::render_helpers::renderer::NiriRenderer;
-use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};
-use crate::utils::{output_size, to_physical_precise_round};
+use niri_config::{Action, Bind, Config, Key, ModKey, Modifiers, Trigger};  // niri配置结构
+use pangocairo::cairo::{self, ImageSurface};  // Cairo图形库
+use pangocairo::pango::{AttrColor, AttrInt, AttrList, AttrString, FontDescription, Weight};  // Pango文本属性
+use smithay::backend::renderer::element::Kind;  // Smithay渲染元素类型
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};  // OpenGL ES渲染器
+use smithay::input::keyboard::xkb::keysym_get_name;  // 获取键位名称
+use smithay::output::{Output, WeakOutput};  // Wayland输出(显示器)
+use smithay::reexports::gbm::Format as Fourcc;  // 图形缓冲区格式
+use smithay::utils::{Scale, Transform};  // 几何变换
+
+use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;  // 主GPU纹理元素
+use crate::render_helpers::renderer::NiriRenderer;  // niri渲染器trait
+use crate::render_helpers::texture::{TextureBuffer, TextureRenderElement};  // 纹理渲染元素
+use crate::utils::{output_size, to_physical_precise_round};  // 工具函数
 
 const PADDING: i32 = 8;
 // const MARGIN: i32 = PADDING * 2;
