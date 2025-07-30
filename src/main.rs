@@ -22,9 +22,6 @@ use clap::{CommandFactory, Parser};
 use directories::ProjectDirs;
 // 引入命令行接口定义
 use niri::cli::{Cli, Sub};
-// 条件编译：当启用dbus特性时引入相关模块
-#[cfg(feature = "dbus")]
-use niri::dbus;
 // IPC客户端消息处理
 use niri::ipc::client::handle_msg;
 // niri主状态机
@@ -266,18 +263,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 导入环境变量到会话管理器
         import_environment();
 
-        // 条件编译：当启用dbus时处理电源键
-        #[cfg(feature = "dbus")]
-        if !state.niri.config.borrow().input.disable_power_key_handling {
-            if let Err(err) = state.niri.inhibit_power_key() {
-                warn!("error inhibiting power key: {err:?}");
-            }
-        }
     }
-
-    // 启动DBus服务（如果启用）
-    #[cfg(feature = "dbus")]
-    dbus::DBusServers::start(&mut state, cli.session);
 
     // 系统通知处理
     if env::var_os("NIRI_DISABLE_SYSTEM_MANAGER_NOTIFY").map_or(true, |x| x != "1") {

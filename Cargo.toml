@@ -121,7 +121,7 @@ wayland-client = "0.31.10"
 xshell = "0.2.7"
 
 [features]
-default = ["dbus", "systemd"]
+default = ["systemd"]
 # Enables D-Bus support (serve various freedesktop and GNOME interfaces, power button handling).
 dbus = ["dep:zbus", "dep:async-io", "dep:url"]
 # Enables systemd integration (global environment, apps in transient scopes).
@@ -153,8 +153,6 @@ version = "25.02"
 assets = [
     { source = "target/release/niri", dest = "/usr/bin/", mode = "755" },
     { source = "resources/niri-session", dest = "/usr/bin/", mode = "755" },
-    { source = "resources/niri.desktop", dest = "/usr/share/wayland-sessions/", mode = "644" },
-    { source = "resources/niri-portals.conf", dest = "/usr/share/xdg-desktop-portal/", mode = "644" },
     { source = "resources/niri.service", dest = "/usr/lib/systemd/user/", mode = "644" },
     { source = "resources/niri-shutdown.target", dest = "/usr/lib/systemd/user/", mode = "644" },
 ]

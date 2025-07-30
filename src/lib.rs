@@ -23,11 +23,6 @@ pub mod cli;
 /// 职责：跟踪光标位置、形状变化和主题设置
 pub mod cursor;
 
-/// 条件编译：仅当启用 "dbus" 功能时包含 dbus 模块
-/// 概念：#[cfg] 属性实现条件编译，常见于特性开关
-#[cfg(feature = "dbus")]
-pub mod dbus;  // D-Bus IPC 接口实现
-
 /// 声明公共模块 frame_clock - 帧同步时钟
 /// 合成器核心：管理VSync信号，协调渲染循环
 pub mod frame_clock;

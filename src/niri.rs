@@ -114,10 +114,6 @@ use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
-#[cfg(feature = "dbus")]
-use crate::dbus::gnome_shell_introspect::{self, IntrospectToNiri, NiriToIntrospect};
-#[cfg(feature = "dbus")]
-use crate::dbus::gnome_shell_screenshot::{NiriToScreenshot, ScreenshotToNiri};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{configure_lock_surface, XDG_ACTIVATION_TOKEN_TIMEOUT};
 use crate::input::pick_color_grab::PickColorGrab;
@@ -362,11 +358,6 @@ pub struct Niri {
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
-
-    #[cfg(feature = "dbus")]
-    pub dbus: Option<crate::dbus::DBusServers>,
-    #[cfg(feature = "dbus")]
-    pub inhibit_power_key_fd: Option<zbus::zvariant::OwnedFd>,  
 
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,  
@@ -1667,9 +1658,6 @@ impl State {
             ipc_output.logical = logical;
         }
 
-        #[cfg(feature = "dbus")]
-        self.niri.on_ipc_outputs_changed();
-
         let new_config = self.backend.ipc_outputs().lock().unwrap().clone();
         self.niri.output_management_state.notify_changes(new_config);
     }
@@ -1759,94 +1747,6 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
-    #[cfg(feature = "dbus")]
-    pub fn on_screen_shot_msg(
-        &mut self,
-        to_screenshot: &async_channel::Sender<NiriToScreenshot>,
-        msg: ScreenshotToNiri,
-    ) {
-        match msg {
-            ScreenshotToNiri::TakeScreenshot { include_cursor } => {
-                self.handle_take_screenshot(to_screenshot, include_cursor);
-            }
-            ScreenshotToNiri::PickColor(tx) => {
-                self.handle_pick_color(tx);
-            }
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    fn handle_take_screenshot(
-        &mut self,
-        to_screenshot: &async_channel::Sender<NiriToScreenshot>,
-        include_cursor: bool,
-    ) {
-        let _span = tracy_client::span!("TakeScreenshot");
-
-        let rv = self.backend.with_primary_renderer(|renderer| {
-            let on_done = {
-                let to_screenshot = to_screenshot.clone();
-                move |path| {
-                    let msg = NiriToScreenshot::ScreenshotResult(Some(path));
-                    if let Err(err) = to_screenshot.send_blocking(msg) {
-                        warn!("error sending path to screenshot: {err:?}");
-                    }
-                }
-            };
-
-            let res = self
-                .niri
-                .screenshot_all_outputs(renderer, include_cursor, on_done);
-
-            if let Err(err) = res {
-                warn!("error taking a screenshot: {err:?}");
-
-                let msg = NiriToScreenshot::ScreenshotResult(None);
-                if let Err(err) = to_screenshot.send_blocking(msg) {
-                    warn!("error sending None to screenshot: {err:?}");
-                }
-            }
-        });
-
-        if rv.is_none() {
-            let msg = NiriToScreenshot::ScreenshotResult(None);
-            if let Err(err) = to_screenshot.send_blocking(msg) {
-                warn!("error sending None to screenshot: {err:?}");
-            }
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_introspect_msg(
-        &mut self,
-        to_introspect: &async_channel::Sender<NiriToIntrospect>,
-        msg: IntrospectToNiri,
-    ) {
-        use crate::utils::with_toplevel_role;
-
-        let IntrospectToNiri::GetWindows = msg;
-        let _span = tracy_client::span!("GetWindows");
-
-        let mut windows = HashMap::new();
-
-
-        self.niri.layout.with_windows(|mapped, _, _| {
-            let id = mapped.id().get();
-            let props = with_toplevel_role(mapped.toplevel(), |role| {
-                gnome_shell_introspect::WindowProperties {
-                    title: role.title.clone().unwrap_or_default(),
-                    app_id: role.app_id.clone().unwrap_or_default(),
-                }
-            });
-
-            windows.insert(id, props);
-        });
-
-        let msg = NiriToIntrospect::Windows(windows);
-        if let Err(err) = to_introspect.send_blocking(msg) {
-            warn!("error sending windows to introspect: {err:?}");
-        }
-    }
 }
 
 impl Niri {
@@ -2223,11 +2123,6 @@ impl Niri {
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
 
-            #[cfg(feature = "dbus")]
-            dbus: None,
-            #[cfg(feature = "dbus")]
-            inhibit_power_key_fd: None,
-
             ipc_server,
             ipc_outputs_changed: false,
 
@@ -2257,35 +2152,6 @@ impl Niri {
         if let Err(err) = self.display_handle.insert_client(client, data) {
             warn!("error inserting client: {err}");
         }
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn inhibit_power_key(&mut self) -> anyhow::Result<()> {
-        use std::os::fd::{AsRawFd, BorrowedFd};
-
-        use smithay::reexports::rustix::io::{fcntl_setfd, FdFlags};
-
-        let conn = zbus::blocking::Connection::system()?;
-
-        let message = conn.call_method(
-            Some("org.freedesktop.login1"),
-            "/org/freedesktop/login1",
-            Some("org.freedesktop.login1.Manager"),
-            "Inhibit",
-            &("handle-power-key", "niri", "Power key handling", "block"),
-        )?;
-
-        let fd: zbus::zvariant::OwnedFd = message.body().deserialize()?;
-
-        // Don't leak the fd to child processes.
-        let borrowed = unsafe { BorrowedFd::borrow_raw(fd.as_raw_fd()) };
-        if let Err(err) = fcntl_setfd(borrowed, FdFlags::CLOEXEC) {
-            warn!("error setting CLOEXEC on inhibit fd: {err:?}");
-        };
-
-        self.inhibit_power_key_fd = Some(fd);
-
-        Ok(())
     }
 
     /// Repositions all outputs, optionally adding a new output.
@@ -4812,8 +4678,6 @@ impl Niri {
             let buf: Arc<[u8]> = Arc::from(buf.into_boxed_slice());
             let _ = tx.send(buf.clone());
 
-            let mut image_path = None;
-
             if let Some(path) = path {
                 debug!("saving screenshot to {path:?}");
 
@@ -4825,95 +4689,10 @@ impl Niri {
                     }
                 }
 
-                match std::fs::write(&path, buf) {
-                    Ok(()) => image_path = Some(path),
-                    Err(err) => {
-                        warn!("error saving screenshot image: {err:?}");
-                    }
-                }
             } else {
                 debug!("not saving screenshot to disk");
             }
 
-            #[cfg(feature = "dbus")]
-            if let Err(err) = crate::utils::show_screenshot_notification(image_path) {
-                warn!("error showing screenshot notification: {err:?}");
-            }
-            #[cfg(not(feature = "dbus"))]
-            drop(image_path);
-        });
-
-        Ok(())
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn screenshot_all_outputs(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        include_pointer: bool,
-        on_done: impl FnOnce(PathBuf) + Send + 'static,
-    ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot_all_outputs");
-
-        self.update_render_elements(None);
-
-        let outputs: Vec<_> = self.global_space.outputs().cloned().collect();
-
-        // FIXME: support multiple outputs, needs fixing multi-scale handling and cropping.
-        anyhow::ensure!(outputs.len() == 1);
-
-        let output = outputs.into_iter().next().unwrap();
-        let geom = self.global_space.output_geometry(&output).unwrap();
-
-        let output_scale = output.current_scale().integer_scale();
-        let geom = geom.to_physical(output_scale);
-
-        let size = geom.size;
-        let transform = output.current_transform();
-        let size = transform.transform_size(size);
-
-        let elements = self.render::<GlesRenderer>(
-            renderer,
-            &output,
-            include_pointer,
-            RenderTarget::ScreenCapture,
-        );
-        let elements = elements.iter().rev();
-        let pixels = render_to_vec(
-            renderer,
-            size,
-            Scale::from(f64::from(output_scale)),
-            Transform::Normal,
-            Fourcc::Abgr8888,
-            elements,
-        )?;
-
-        let path = make_screenshot_path(&self.config.borrow())
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| {
-                let mut path = env::temp_dir();
-                path.push("screenshot.png");
-                path
-            });
-        debug!("saving screenshot to {path:?}");
-
-        thread::spawn(move || {
-            let file = match std::fs::File::create(&path) {
-                Ok(file) => file,
-                Err(err) => {
-                    warn!("error creating file: {err:?}");
-                    return;
-                }
-            };
-
-            let w = std::io::BufWriter::new(file);
-            if let Err(err) = write_png_rgba8(w, size.w as u32, size.h as u32, &pixels) {
-                warn!("error encoding screenshot image: {err:?}");
-                return;
-            }
-
-            on_done(path);
         });
 
         Ok(())
@@ -5142,44 +4921,6 @@ impl Niri {
         }
 
         root.clone()
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_ipc_outputs_changed(&self) {
-        let _span = tracy_client::span!("Niri::on_ipc_outputs_changed");
-
-        let Some(dbus) = &self.dbus else { return };
-        let Some(conn_display_config) = dbus.conn_display_config.clone() else {
-            return;
-        };
-
-        let res = thread::Builder::new()
-            .name("DisplayConfig MonitorsChanged Emitter".to_owned())
-            .spawn(move || {
-                use crate::dbus::mutter_display_config::DisplayConfig;
-                let _span = tracy_client::span!("MonitorsChanged");
-                let iface = match conn_display_config
-                    .object_server()
-                    .interface::<_, DisplayConfig>("/org/gnome/Mutter/DisplayConfig")
-                {
-                    Ok(iface) => iface,
-                    Err(err) => {
-                        warn!("error getting DisplayConfig interface: {err:?}");
-                        return;
-                    }
-                };
-
-                async_io::block_on(async move {
-                    if let Err(err) = DisplayConfig::monitors_changed(iface.signal_emitter()).await
-                    {
-                        warn!("error emitting MonitorsChanged: {err:?}");
-                    }
-                });
-            });
-
-        if let Err(err) = res {
-            warn!("error spawning a thread to send MonitorsChanged: {err:?}");
-        }
     }
 
     pub fn handle_focus_follows_mouse(&mut self, new_focus: &PointContents) {
