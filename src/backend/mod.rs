@@ -226,21 +226,6 @@ impl Backend {
         }
     }
 
-    // 函数：获取GBM设备（条件编译）
-    // 作用：仅TTY后端提供DMA缓冲区分配设备
-    // 用途：屏幕共享功能需要
-    #[cfg(feature = "xdp-gnome-screencast")]
-    pub fn gbm_device(
-        &self,
-    ) -> Option<smithay::backend::allocator::gbm::GbmDevice<smithay::backend::drm::DrmDeviceFd>>
-    {
-        if let Backend::Tty(tty) = self {
-            tty.primary_gbm_device()
-        } else {
-            None
-        }
-    }
-
     // 函数：设置显示器电源状态
     // 作用：仅TTY后端支持（控制DRM设备电源）
     pub fn set_monitors_active(&mut self, active: bool) {

@@ -1703,19 +1703,6 @@ impl Tty {
         self.ipc_outputs.clone()
     }
 
-    #[cfg(feature = "xdp-gnome-screencast")]
-    pub fn primary_gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
-        // Try to find a device corresponding to the primary render node.
-        let device = self
-            .devices
-            .values()
-            .find(|d| d.render_node == self.primary_render_node);
-        // Otherwise, try to get the device corresponding to the primary node.
-        let device = device.or_else(|| self.devices.get(&self.primary_node));
-
-        Some(device?.gbm.clone())
-    }
-
     pub fn set_monitors_active(&mut self, active: bool) {
         // We only disable the CRTC here, this will also reset the
         // surface state so that the next call to `render_frame` will

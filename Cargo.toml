@@ -76,7 +76,6 @@ niri-ipc = { version = "25.5.1", path = "niri-ipc", features = ["clap"] }
 ordered-float = "5.0.0"
 pango = { version = "0.20.10", features = ["v1_44"] }
 pangocairo = "0.20.10"
-pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = ["v0_3_33"] }
 png = "0.17.16"
 portable-atomic = { version = "1.11.0", default-features = false, features = ["float"] }
 profiling = "1.0.16"
@@ -122,13 +121,11 @@ wayland-client = "0.31.10"
 xshell = "0.2.7"
 
 [features]
-default = ["dbus", "systemd", "xdp-gnome-screencast"]
+default = ["dbus", "systemd"]
 # Enables D-Bus support (serve various freedesktop and GNOME interfaces, power button handling).
 dbus = ["dep:zbus", "dep:async-io", "dep:url"]
 # Enables systemd integration (global environment, apps in transient scopes).
 systemd = ["dbus"]
-# Enables screencasting support through xdg-desktop-portal-gnome.
-xdp-gnome-screencast = ["dbus", "pipewire"]
 # Enables the Tracy profiler instrumentation.
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 # Enables the on-demand Tracy profiler instrumentation.

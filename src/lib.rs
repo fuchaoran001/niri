@@ -80,22 +80,6 @@ pub mod utils;
 /// 核心数据结构：表示单个窗口及其状态
 pub mod window;
 
-/// 条件编译：当未启用 xdp-gnome-screencast 功能时
-/// 提供虚拟的 PipeWire 工具实现（空操作）
-#[cfg(not(feature = "xdp-gnome-screencast"))]
-pub mod dummy_pw_utils;
-
-/// 条件编译：当启用 xdp-gnome-screencast 功能时
-/// 提供真正的 PipeWire 屏幕捕获实现
-#[cfg(feature = "xdp-gnome-screencast")]
-pub mod pw_utils;
-
-/// 统一导出：无论是否启用 xdp-gnome-screencast
-/// 都使用 pw_utils 名称导出对应模块
-/// 设计意图：简化调用方代码，避免条件判断
-#[cfg(not(feature = "xdp-gnome-screencast"))]
-pub use dummy_pw_utils as pw_utils;  // 重定向到虚拟实现
-
 /// 条件编译：测试专用模块
 /// 仅在运行 cargo test 时包含
 #[cfg(test)]

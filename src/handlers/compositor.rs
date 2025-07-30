@@ -25,7 +25,7 @@ use smithay::{delegate_compositor, delegate_shm};
 use super::xdg_shell::add_mapped_toplevel_pre_commit_hook;
 use crate::handlers::XDG_ACTIVATION_TOKEN_TIMEOUT;
 use crate::layout::{ActivateWindow, AddWindowTarget};
-use crate::niri::{CastTarget, ClientState, LockState, State};
+use crate::niri::{ClientState, LockState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{is_mapped, send_scale_transform};
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped};
@@ -226,8 +226,6 @@ impl CompositorHandler for State {
                 let window = mapped.window.clone();
                 let output = output.cloned();
 
-                let id = mapped.id();
-
                 // This is a commit of a previously-mapped toplevel.
                 let is_mapped = is_mapped(surface);
 
@@ -250,9 +248,6 @@ impl CompositorHandler for State {
                     // Test client: wleird-unmap.
                     let active_window = self.niri.layout.focus().map(|m| &m.window);
                     let was_active = active_window == Some(&window);
-
-                    self.niri
-                        .stop_casts_for_target(CastTarget::Window { id: id.get() });
 
                     self.niri.layout.remove_window(&window, transaction.clone());
                     self.add_default_dmabuf_pre_commit_hook(surface);

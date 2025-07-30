@@ -123,7 +123,7 @@ use self::resize_grab::ResizeGrab;
 use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
-use crate::niri::{CastTarget, PointerVisibility, State};
+use crate::niri::{ PointerVisibility, State};
 use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::spawn;
 use crate::utils::{center, get_monotonic_time, ResizeEdge};
@@ -2018,36 +2018,6 @@ impl State {
                         self.niri.queue_redraw_all();
                     }
                 }
-            }
-            Action::SetDynamicCastWindow => {
-                let id = self
-                    .niri
-                    .layout
-                    .active_workspace()
-                    .and_then(|ws| ws.active_window())
-                    .map(|mapped| mapped.id().get());
-                if let Some(id) = id {
-                    self.set_dynamic_cast_target(CastTarget::Window { id });
-                }
-            }
-            Action::SetDynamicCastWindowById(id) => {
-                let layout = &self.niri.layout;
-                if layout.windows().any(|(_, mapped)| mapped.id().get() == id) {
-                    self.set_dynamic_cast_target(CastTarget::Window { id });
-                }
-            }
-            Action::SetDynamicCastMonitor(output) => {
-                let output = match output {
-                    None => self.niri.layout.active_output(),
-                    Some(name) => self.niri.output_by_name_match(&name),
-                };
-                if let Some(output) = output {
-                    let output = output.downgrade();
-                    self.set_dynamic_cast_target(CastTarget::Output(output));
-                }
-            }
-            Action::ClearDynamicCastTarget => {
-                self.set_dynamic_cast_target(CastTarget::Nothing);
             }
             Action::ToggleOverview => {
                 self.niri.layout.toggle_overview();

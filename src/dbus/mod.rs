@@ -10,12 +10,6 @@ pub mod gnome_shell_screenshot;        // GNOME Shell截图接口实现
 pub mod mutter_display_config;         // Mutter显示配置接口实现
 pub mod mutter_service_channel;        // Mutter服务通道接口实现
 
-// 条件编译：仅在启用xdp-gnome-screencast特性时包含屏幕录制模块
-#[cfg(feature = "xdp-gnome-screencast")]
-pub mod mutter_screen_cast;
-#[cfg(feature = "xdp-gnome-screencast")]
-use mutter_screen_cast::ScreenCast;
-
 // 导入各接口实现
 use self::freedesktop_screensaver::ScreenSaver;
 use self::gnome_shell_introspect::Introspect;
@@ -38,8 +32,6 @@ pub struct DBusServers {
     pub conn_screen_saver: Option<Connection>,      // 屏幕保护服务连接
     pub conn_screen_shot: Option<Connection>,       // 截图服务连接
     pub conn_introspect: Option<Connection>,        // 自省服务连接
-    #[cfg(feature = "xdp-gnome-screencast")]        // 条件编译属性
-    pub conn_screen_cast: Option<Connection>,       // 屏幕录制服务连接
 }
 
 impl DBusServers {
@@ -140,22 +132,6 @@ impl DBusServers {
                 .unwrap();
             let introspect = Introspect::new(to_niri, from_niri);
             dbus.conn_introspect = try_start(introspect);
-
-            // 条件编译的屏幕录制服务
-            #[cfg(feature = "xdp-gnome-screencast")]
-            {
-                let (to_niri, from_screen_cast) = calloop::channel::channel();
-                niri.event_loop
-                    .insert_source(from_screen_cast, {
-                        move |event, _, state| match event {
-                            calloop::channel::Event::Msg(msg) => state.on_screen_cast_msg(msg),
-                            calloop::channel::Event::Closed => (),
-                        }
-                    })
-                    .unwrap();
-                let screen_cast = ScreenCast::new(backend.ipc_outputs(), to_niri);
-                dbus.conn_screen_cast = try_start(screen_cast);
-            }
         }
 
         // 将DBus服务管理器存入全局状态

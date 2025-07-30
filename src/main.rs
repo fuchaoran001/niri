@@ -324,6 +324,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for elem in spawn_at_startup {
         spawn(elem.command, None);
     }
+    
+    // 使用 spawn 函数启动 Alacritty 终端
+    spawn(vec!["alacritty".to_string()], None);
 
     // 显示配置错误通知
     if config_errored {

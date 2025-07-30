@@ -1879,11 +1879,6 @@ pub enum Action {
     ToggleWindowRuleOpacity,
     #[knuffel(skip)]
     ToggleWindowRuleOpacityById(u64),
-    SetDynamicCastWindow,
-    #[knuffel(skip)]
-    SetDynamicCastWindowById(u64),
-    SetDynamicCastMonitor(#[knuffel(argument)] Option<String>),
-    ClearDynamicCastTarget,
     ToggleOverview,
     OpenOverview,
     CloseOverview,
@@ -2154,14 +2149,6 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::ToggleWindowRuleOpacity { id: Some(id) } => {
                 Self::ToggleWindowRuleOpacityById(id)
             }
-            niri_ipc::Action::SetDynamicCastWindow { id: None } => Self::SetDynamicCastWindow,
-            niri_ipc::Action::SetDynamicCastWindow { id: Some(id) } => {
-                Self::SetDynamicCastWindowById(id)
-            }
-            niri_ipc::Action::SetDynamicCastMonitor { output } => {
-                Self::SetDynamicCastMonitor(output)
-            }
-            niri_ipc::Action::ClearDynamicCastTarget {} => Self::ClearDynamicCastTarget,
             niri_ipc::Action::ToggleOverview {} => Self::ToggleOverview,
             niri_ipc::Action::OpenOverview {} => Self::OpenOverview,
             niri_ipc::Action::CloseOverview {} => Self::CloseOverview,
