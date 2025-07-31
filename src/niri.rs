@@ -47,8 +47,8 @@ use smithay::desktop::{
 };
 use smithay::input::keyboard::Layout as KeyboardLayout;
 use smithay::input::pointer::{
-    CursorIcon, CursorImageStatus, CursorImageSurfaceData, Focus,
-    GrabStartData as PointerGrabStartData, MotionEvent,
+    CursorIcon, CursorImageStatus, CursorImageSurfaceData,
+     MotionEvent,
 };
 use smithay::input::{Seat, SeatState};
 use smithay::output::{self, Output, OutputModeSource, PhysicalProperties, Subpixel};
@@ -116,7 +116,6 @@ use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{configure_lock_surface, XDG_ACTIVATION_TOKEN_TIMEOUT};
-use crate::input::pick_color_grab::PickColorGrab;
 use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
 use crate::input::{
@@ -344,8 +343,6 @@ pub struct Niri {
     pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
 
     pub pick_window: Option<async_channel::Sender<Option<MappedId>>>,
-    pub pick_color: Option<async_channel::Sender<Option<niri_ipc::PickedColor>>>,  
-
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
 
@@ -1696,21 +1693,6 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
-    pub fn handle_pick_color(&mut self, tx: async_channel::Sender<Option<niri_ipc::PickedColor>>) {
-        let pointer = self.niri.seat.get_pointer().unwrap();
-        let start_data = PointerGrabStartData {
-            focus: None,
-            button: 0,
-            location: pointer.current_location(),
-        };
-        let grab = PickColorGrab::new(start_data);
-        pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
-        self.niri.pick_color = Some(tx);
-        self.niri
-            .cursor_manager
-            .set_cursor_image(CursorImageStatus::Named(CursorIcon::Crosshair));
-        self.niri.queue_redraw_all();
-    }
 
     pub fn confirm_screenshot(&mut self, write_to_disk: bool) {
         if !self.niri.screenshot_ui.is_open() {
@@ -2101,7 +2083,6 @@ impl Niri {
             exit_confirm_dialog,
 
             pick_window: None,
-            pick_color: None,
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,

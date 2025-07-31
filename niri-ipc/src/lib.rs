@@ -82,8 +82,6 @@ pub enum Request {
     FocusedWindow,
     /// Request picking a window and get its information.
     PickWindow,
-    /// Request picking a color from the screen.
-    PickColor,
     /// Perform an action.
     Action(Action),
     /// Change output configuration temporarily.
