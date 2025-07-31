@@ -143,7 +143,6 @@ use crate::render_helpers::{
     render_to_texture, shaders, RenderTarget, SplitElements,
 };
 use crate::ui::config_error_notification::ConfigErrorNotification;
-use crate::ui::exit_confirm_dialog::ExitConfirmDialog;
 use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
@@ -330,7 +329,6 @@ pub struct Niri {
 
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
-    pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
@@ -1783,14 +1781,6 @@ impl Niri {
             hotkey_overlay.show();
         }
 
-        let exit_confirm_dialog = match ExitConfirmDialog::new() {
-            Ok(x) => Some(x),
-            Err(err) => {
-                warn!("error creating the exit confirm dialog: {err:?}");
-                None
-            }
-        };
-
         event_loop
             .insert_source(
                 Timer::from_duration(Duration::from_secs(1)),
@@ -1953,7 +1943,6 @@ impl Niri {
 
             config_error_notification,
             hotkey_overlay,
-            exit_confirm_dialog,
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
@@ -3187,13 +3176,6 @@ impl Niri {
             let state = self.output_state.get(output).unwrap();
             if let Some(transition) = &state.screen_transition {
                 elements.push(transition.render(target).into());
-            }
-        }
-
-        // Next, the exit confirm dialog.
-        if let Some(dialog) = &self.exit_confirm_dialog {
-            if let Some(element) = dialog.render(renderer, output) {
-                elements.push(element.into());
             }
         }
 

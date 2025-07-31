@@ -194,13 +194,6 @@ impl State {
         let hide_hotkey_overlay =
             self.niri.hotkey_overlay.is_open() && should_hide_hotkey_overlay(&event);
 
-        let hide_exit_confirm_dialog = self
-            .niri
-            .exit_confirm_dialog
-            .as_ref()
-            .is_some_and(|d| d.is_open())
-            && should_hide_exit_confirm_dialog(&event);
-
         use InputEvent::*;
         match event {
             DeviceAdded { device } => self.on_device_added(device),
@@ -235,12 +228,6 @@ impl State {
         // FIXME: do this in a less cursed fashion somehow.
         if hide_hotkey_overlay && self.niri.hotkey_overlay.hide() {
             self.niri.queue_redraw_all();
-        }
-
-        if let Some(dialog) = &mut self.niri.exit_confirm_dialog {
-            if hide_exit_confirm_dialog && dialog.hide() {
-                self.niri.queue_redraw_all();
-            }
         }
     }
 
@@ -448,17 +435,6 @@ impl State {
                 let modified = keysym.modified_sym();
                 let raw = keysym.raw_latin_sym_or_raw_current_sym();
 
-                if let Some(dialog) = &this.niri.exit_confirm_dialog {
-                    if dialog.is_open() && pressed && raw == Some(Keysym::Return) {
-                        info!("quitting after confirming exit dialog");
-                        this.niri.stop_signal.stop();
-
-                        // Don't send this Enter press to any clients.
-                        this.niri.suppressed_keys.insert(key_code);
-                        return FilterResult::Intercept(None);
-                    }
-                }
-
                 if pressed
                     && raw == Some(Keysym::Escape)
                 {
@@ -605,16 +581,7 @@ impl State {
         }
 
         match action {
-            Action::Quit(skip_confirmation) => {
-                if !skip_confirmation {
-                    if let Some(dialog) = &mut self.niri.exit_confirm_dialog {
-                        if dialog.show() {
-                            self.niri.queue_redraw_all();
-                        }
-                        return;
-                    }
-                }
-
+            Action::Quit(_skip_confirmation) => {
                 info!("quitting as requested");
                 self.niri.stop_signal.stop()
             }
@@ -3836,21 +3803,6 @@ fn should_hide_hotkey_overlay<I: InputBackend>(event: &InputEvent<I>) -> bool {
     }
 }
 
-fn should_hide_exit_confirm_dialog<I: InputBackend>(event: &InputEvent<I>) -> bool {
-    match event {
-        InputEvent::Keyboard { event } if event.state() == KeyState::Pressed => true,
-        InputEvent::PointerButton { event } if event.state() == ButtonState::Pressed => true,
-        InputEvent::PointerAxis { .. }
-        | InputEvent::GestureSwipeBegin { .. }
-        | InputEvent::GesturePinchBegin { .. }
-        | InputEvent::TouchDown { .. }
-        | InputEvent::TouchMotion { .. }
-        | InputEvent::TabletToolTip { .. }
-        | InputEvent::TabletToolButton { .. } => true,
-        _ => false,
-    }
-}
-
 fn should_notify_activity<I: InputBackend>(event: &InputEvent<I>) -> bool {
     !matches!(
         event,
@@ -3871,7 +3823,6 @@ fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>)
             | InputEvent::TabletToolTip { .. }
     )
 }
-
 
 fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
     let mods = modifiers_from_state(mods);
