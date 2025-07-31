@@ -13,19 +13,16 @@
 
 use std::cmp::{max, min}; // 导入最大值/最小值比较函数
 use std::f64; // 64位浮点数支持
-use std::ffi::{CString, OsStr}; // FFI字符串处理
 use std::io::Write; // IO写操作trait
-use std::os::unix::prelude::OsStrExt; // Unix路径处理扩展
 use std::path::{Path, PathBuf}; // 路径处理
-use std::ptr::null_mut; // 空指针常量
 use std::sync::atomic::AtomicBool; // 原子布尔类型
 use std::time::Duration; // 时间间隔类型
 
-use anyhow::{ensure, Context}; // 错误处理工具
+use anyhow::{Context}; // 错误处理工具
 use bitflags::bitflags; // 位标志宏
 use directories::UserDirs; // 用户目录获取
 use git_version::git_version; // Git版本信息获取
-use niri_config::{Config, OutputName}; // 配置结构体
+use niri_config::{OutputName}; // 配置结构体
 use smithay::backend::renderer::utils::with_renderer_surface_state; // 渲染器表面状态访问
 use smithay::input::pointer::CursorIcon; // 鼠标指针图标
 use smithay::output::{self, Output}; // 输出设备管理
@@ -273,49 +270,6 @@ pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     } else {
         Ok(None) // 不包含"~"
     }
-}
-
-/// 生成截图保存路径（带时间格式化）
-///
-/// 处理流程：
-/// 1. 检查配置中是否启用了截图路径
-/// 2. 格式化时间戳（使用系统本地时间）
-/// 3. 展开主目录"~"
-/// 4. 返回完整路径
-pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> {
-    // 从配置获取截图路径模板
-    let Some(path) = &config.screenshot_path else {
-        return Ok(None); // 未配置截图路径
-    };
-
-    // 转换为C字符串（确保无空字符）
-    let format = CString::new(path.clone()).context("path must not contain nul bytes")?;
-
-    let mut buf = [0u8; 2048]; // 格式化缓冲区
-    let mut path; // 结果路径
-    unsafe {
-        // 获取当前时间
-        let time = libc::time(null_mut());
-        ensure!(time != -1, "error in time()");
-
-        // 转换为本地时间
-        let tm = libc::localtime(&time);
-        ensure!(!tm.is_null(), "error in localtime()");
-
-        // 格式化时间字符串
-        let rv = libc::strftime(buf.as_mut_ptr().cast(), buf.len(), format.as_ptr(), tm);
-        ensure!(rv != 0, "error formatting time");
-
-        // 转换为PathBuf
-        path = PathBuf::from(OsStr::from_bytes(&buf[..rv]));
-    }
-
-    // 展开主目录
-    if let Some(expanded) = expand_home(&path).context("error expanding ~")? {
-        path = expanded;
-    }
-
-    Ok(Some(path))
 }
 
 /// 将RGBA8像素数据写入PNG格式

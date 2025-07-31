@@ -309,10 +309,6 @@ impl XdgShellHandler for State {
                 let _ = PopupManager::dismiss_popup(&root, &popup);
                 return;
             }
-        } else if self.niri.screenshot_ui.is_open() {
-            trace!("ignoring popup grab because the screenshot UI is open");
-            let _ = PopupManager::dismiss_popup(&root, &popup);
-            return;
         } else if let Some(output) = self.niri.layout.active_output() {
             let layers = layer_map_for_output(output);
 

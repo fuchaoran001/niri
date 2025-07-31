@@ -124,7 +124,6 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
 use crate::niri::{ PointerVisibility, State};
-use crate::ui::screenshot_ui::ScreenshotUi;
 use crate::utils::spawning::spawn;
 use crate::utils::{center, get_monotonic_time, ResizeEdge};
 
@@ -475,6 +474,7 @@ impl State {
                 }
 
                 let bindings = &this.niri.config.borrow().binds;
+
                 let res = should_intercept_key(
                     &mut this.niri.suppressed_keys,
                     bindings,
@@ -484,7 +484,6 @@ impl State {
                     raw,
                     pressed,
                     *mods,
-                    &this.niri.screenshot_ui,
                     this.niri.config.borrow().input.disable_power_key_handling,
                     is_inhibiting_shortcuts,
                 );
@@ -663,68 +662,6 @@ impl State {
                     self.niri.do_screen_transition(renderer, delay_ms);
                 });
             }
-            Action::ScreenshotScreen(write_to_disk, show_pointer) => {
-                let active = self.niri.layout.active_output().cloned();
-                if let Some(active) = active {
-                    self.backend.with_primary_renderer(|renderer| {
-                        if let Err(err) =
-                            self.niri
-                                .screenshot(renderer, &active, write_to_disk, show_pointer)
-                        {
-                            warn!("error taking screenshot: {err:?}");
-                        }
-                    });
-                }
-            }
-            Action::ConfirmScreenshot { write_to_disk } => {
-                self.confirm_screenshot(write_to_disk);
-            }
-            Action::CancelScreenshot => {
-                if !self.niri.screenshot_ui.is_open() {
-                    return;
-                }
-
-                self.niri.screenshot_ui.close();
-                self.niri
-                    .cursor_manager
-                    .set_cursor_image(CursorImageStatus::default_named());
-                self.niri.queue_redraw_all();
-            }
-            Action::ScreenshotTogglePointer => {
-                self.niri.screenshot_ui.toggle_pointer();
-                self.niri.queue_redraw_all();
-            }
-            Action::Screenshot(show_cursor) => {
-                self.open_screenshot_ui(show_cursor);
-            }
-            Action::ScreenshotWindow(write_to_disk) => {
-                let focus = self.niri.layout.focus_with_output();
-                if let Some((mapped, output)) = focus {
-                    self.backend.with_primary_renderer(|renderer| {
-                        if let Err(err) =
-                            self.niri
-                                .screenshot_window(renderer, output, mapped, write_to_disk)
-                        {
-                            warn!("error taking screenshot: {err:?}");
-                        }
-                    });
-                }
-            }
-            Action::ScreenshotWindowById { id, write_to_disk } => {
-                let mut windows = self.niri.layout.windows();
-                let window = windows.find(|(_, m)| m.id().get() == id);
-                if let Some((Some(monitor), mapped)) = window {
-                    let output = monitor.output();
-                    self.backend.with_primary_renderer(|renderer| {
-                        if let Err(err) =
-                            self.niri
-                                .screenshot_window(renderer, output, mapped, write_to_disk)
-                        {
-                            warn!("error taking screenshot: {err:?}");
-                        }
-                    });
-                }
-            }
             Action::ToggleKeyboardShortcutsInhibit => {
                 if let Some(inhibitor) = self.niri.keyboard_focus.surface().and_then(|surface| {
                     self.niri
@@ -818,23 +755,18 @@ impl State {
                 });
             }
             Action::MoveColumnLeft => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.move_left();
-                } else {
+
                     self.niri.layout.move_left();
                     self.maybe_warp_cursor_to_focus();
-                }
 
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
             Action::MoveColumnRight => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.move_right();
-                } else {
+
                     self.niri.layout.move_right();
                     self.maybe_warp_cursor_to_focus();
-                }
+                
 
                 // FIXME: granular
                 self.niri.queue_redraw_all();
@@ -886,23 +818,19 @@ impl State {
                 self.niri.queue_redraw_all();
             }
             Action::MoveWindowDown => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.move_down();
-                } else {
+
                     self.niri.layout.move_down();
                     self.maybe_warp_cursor_to_focus();
-                }
+                
 
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
             Action::MoveWindowUp => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.move_up();
-                } else {
+
                     self.niri.layout.move_up();
                     self.maybe_warp_cursor_to_focus();
-                }
+                
 
                 // FIXME: granular
                 self.niri.queue_redraw_all();
@@ -1770,24 +1698,14 @@ impl State {
                 }
             }
             Action::SetColumnWidth(change) => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.set_width(change);
-
-                    // FIXME: granular
-                    self.niri.queue_redraw_all();
-                } else {
+ 
                     self.niri.layout.set_column_width(change);
-                }
+                
             }
             Action::SetWindowWidth(change) => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.set_width(change);
 
-                    // FIXME: granular
-                    self.niri.queue_redraw_all();
-                } else {
                     self.niri.layout.set_window_width(None, change);
-                }
+                
             }
             Action::SetWindowWidthById { id, change } => {
                 let window = self.niri.layout.windows().find(|(_, m)| m.id().get() == id);
@@ -1797,14 +1715,9 @@ impl State {
                 }
             }
             Action::SetWindowHeight(change) => {
-                if self.niri.screenshot_ui.is_open() {
-                    self.niri.screenshot_ui.set_height(change);
-
-                    // FIXME: granular
-                    self.niri.queue_redraw_all();
-                } else {
+ 
                     self.niri.layout.set_window_height(None, change);
-                }
+                
             }
             Action::SetWindowHeightById { id, change } => {
                 let window = self.niri.layout.windows().find(|(_, m)| m.id().get() == id);
@@ -2171,21 +2084,6 @@ impl State {
             }
         }
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let mut point = (new_pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            let size = output.current_mode().unwrap().size;
-            let transform = output.current_transform();
-            let size = transform.transform_size(size);
-            point.x = point.x.clamp(0, size.w - 1);
-            point.y = point.y.clamp(0, size.h - 1);
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
         let under = self.niri.contents_under(new_pos);
 
         // Handle confined pointer.
@@ -2252,7 +2150,6 @@ impl State {
         let hot_corners = self.niri.config.borrow().gestures.hot_corners;
         if !hot_corners.off
             && pointer.current_focus().is_none()
-            && !self.niri.screenshot_ui.is_open()
         {
             let hot_corner = Rectangle::from_size(Size::from((1., 1.)));
             if let Some((_, pos_within_output)) = self.niri.output_under(pos) {
@@ -2304,21 +2201,6 @@ impl State {
 
         let pointer = self.niri.seat.get_pointer().unwrap();
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let mut point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            let size = output.current_mode().unwrap().size;
-            let transform = output.current_transform();
-            let size = transform.transform_size(size);
-            point.x = point.x.clamp(0, size.w - 1);
-            point.y = point.y.clamp(0, size.h - 1);
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
         let under = self.niri.contents_under(pos);
 
         self.niri.handle_focus_follows_mouse(&under);
@@ -2341,7 +2223,6 @@ impl State {
         let hot_corners = self.niri.config.borrow().gestures.hot_corners;
         if !hot_corners.off
             && pointer.current_focus().is_none()
-            && !self.niri.screenshot_ui.is_open()
         {
             let hot_corner = Rectangle::from_size(Size::from((1., 1.)));
             if let Some((_, pos_within_output)) = self.niri.output_under(pos) {
@@ -2634,7 +2515,7 @@ impl State {
             self.niri.focus_layer_surface_if_on_demand(layer_under);
         }
 
-        if button == Some(MouseButton::Left) && self.niri.screenshot_ui.is_open() {
+        if button == Some(MouseButton::Left) {
             if button_state == ButtonState::Pressed {
                 let pos = pointer.current_location();
                 if let Some((output, _)) = self.niri.output_under(pos) {
@@ -2650,15 +2531,6 @@ impl State {
                     point.x = min(size.w - 1, point.x);
                     point.y = min(size.h - 1, point.y);
 
-                    if self.niri.screenshot_ui.pointer_down(output, point, None) {
-                        self.niri.queue_redraw_all();
-                    }
-                }
-            } else if let Some(capture) = self.niri.screenshot_ui.pointer_up(None) {
-                if capture {
-                    self.confirm_screenshot(true);
-                } else {
-                    self.niri.queue_redraw_all();
                 }
             }
         }
@@ -3097,21 +2969,6 @@ impl State {
             return;
         };
 
-        if let Some(output) = self.niri.screenshot_ui.selection_output() {
-            let geom = self.niri.global_space.output_geometry(output).unwrap();
-            let mut point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            let size = output.current_mode().unwrap().size;
-            let transform = output.current_transform();
-            let size = transform.transform_size(size);
-            point.x = point.x.clamp(0, size.w - 1);
-            point.y = point.y.clamp(0, size.h - 1);
-
-            self.niri.screenshot_ui.pointer_motion(point, None);
-        }
-
         let under = self.niri.contents_under(pos);
 
         let tablet_seat = self.niri.seat.tablet_seat();
@@ -3172,24 +3029,7 @@ impl State {
                 if let Some(pos) = self.niri.tablet_cursor_location {
                     let under = self.niri.contents_under(pos);
 
-                    if self.niri.screenshot_ui.is_open() {
-                        if let Some(output) = under.output.clone() {
-                            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                            let mut point = (pos - geom.loc.to_f64())
-                                .to_physical(output.current_scale().fractional_scale())
-                                .to_i32_round();
-
-                            let size = output.current_mode().unwrap().size;
-                            let transform = output.current_transform();
-                            let size = transform.transform_size(size);
-                            point.x = min(size.w - 1, point.x);
-                            point.y = min(size.h - 1, point.y);
-
-                            if self.niri.screenshot_ui.pointer_down(output, point, None) {
-                                self.niri.queue_redraw_all();
-                            }
-                        }
-                    } else if let Some((window, _)) = under.window {
+                    if let Some((window, _)) = under.window {
                         if let Some(output) = is_overview_open.then_some(under.output).flatten() {
                             let mut workspaces = self.niri.layout.workspaces();
                             if let Some(ws_idx) = workspaces.find_map(|(_, ws_idx, ws)| {
@@ -3226,13 +3066,6 @@ impl State {
                 }
             }
             TabletToolTipState::Up => {
-                if let Some(capture) = self.niri.screenshot_ui.pointer_up(None) {
-                    if capture {
-                        self.confirm_screenshot(true);
-                    } else {
-                        self.niri.queue_redraw_all();
-                    }
-                }
 
                 tool.tip_up(event.time_msec());
             }
@@ -3629,28 +3462,7 @@ impl State {
 
         let mod_key = self.backend.mod_key(&self.niri.config.borrow());
 
-        if self.niri.screenshot_ui.is_open() {
-            if let Some(output) = under.output.clone() {
-                let geom = self.niri.global_space.output_geometry(&output).unwrap();
-                let mut point = (pos - geom.loc.to_f64())
-                    .to_physical(output.current_scale().fractional_scale())
-                    .to_i32_round();
-
-                let size = output.current_mode().unwrap().size;
-                let transform = output.current_transform();
-                let size = transform.transform_size(size);
-                point.x = min(size.w - 1, point.x);
-                point.y = min(size.h - 1, point.y);
-
-                if self
-                    .niri
-                    .screenshot_ui
-                    .pointer_down(output, point, Some(slot))
-                {
-                    self.niri.queue_redraw_all();
-                }
-            }
-        } else if !handle.is_grabbed() {
+        if !handle.is_grabbed() {
             let mods = self.niri.seat.get_keyboard().unwrap().modifier_state();
             let mods = modifiers_from_state(mods);
             let mod_down = mods.contains(mod_key.to_modifiers());
@@ -3744,14 +3556,6 @@ impl State {
         };
         let slot = evt.slot();
 
-        if let Some(capture) = self.niri.screenshot_ui.pointer_up(Some(slot)) {
-            if capture {
-                self.confirm_screenshot(true);
-            } else {
-                self.niri.queue_redraw_all();
-            }
-        }
-
         let serial = SERIAL_COUNTER.next_serial();
         handle.up(
             self,
@@ -3770,22 +3574,6 @@ impl State {
             return;
         };
         let slot = evt.slot();
-
-        if let Some(output) = self.niri.screenshot_ui.selection_output().cloned() {
-            let geom = self.niri.global_space.output_geometry(&output).unwrap();
-            let mut point = (pos - geom.loc.to_f64())
-                .to_physical(output.current_scale().fractional_scale())
-                .to_i32_round::<i32>();
-
-            let size = output.current_mode().unwrap().size;
-            let transform = output.current_transform();
-            let size = transform.transform_size(size);
-            point.x = point.x.clamp(0, size.w - 1);
-            point.y = point.y.clamp(0, size.h - 1);
-
-            self.niri.screenshot_ui.pointer_motion(point, Some(slot));
-            self.niri.queue_redraw(&output);
-        }
 
         let under = self.niri.contents_under(pos);
         handle.motion(
@@ -3859,7 +3647,6 @@ fn should_intercept_key(
     raw: Option<Keysym>,
     pressed: bool,
     mods: ModifiersState,
-    screenshot_ui: &ScreenshotUi,
     disable_power_key_handling: bool,
     is_inhibiting_shortcuts: bool,
 ) -> FilterResult<Option<Bind>> {
@@ -3870,7 +3657,7 @@ fn should_intercept_key(
         return FilterResult::Forward;
     }
 
-    let mut final_bind = find_bind(
+    let final_bind = find_bind(
         bindings,
         mod_key,
         modified,
@@ -3878,39 +3665,6 @@ fn should_intercept_key(
         mods,
         disable_power_key_handling,
     );
-
-    // Allow only a subset of compositor actions while the screenshot UI is open, since the user
-    // cannot see the screen.
-    if screenshot_ui.is_open() {
-        let mut use_screenshot_ui_action = true;
-
-        if let Some(bind) = &final_bind {
-            if allowed_during_screenshot(&bind.action) {
-                use_screenshot_ui_action = false;
-            }
-        }
-
-        if use_screenshot_ui_action {
-            if let Some(raw) = raw {
-                final_bind = screenshot_ui.action(raw, mods).map(|action| Bind {
-                    key: Key {
-                        trigger: Trigger::Keysym(raw),
-                        // Not entirely correct but it doesn't matter in how we currently use it.
-                        modifiers: Modifiers::empty(),
-                    },
-                    action,
-                    repeat: true,
-                    cooldown: None,
-                    allow_when_locked: false,
-                    // The screenshot UI owns the focus anyway, so this doesn't really matter.
-                    // But logically, nothing can inhibit its actions. Only opening it can be
-                    // inhibited.
-                    allow_inhibiting: false,
-                    hotkey_overlay_title: None,
-                });
-            }
-        }
-    }
 
     match (final_bind, pressed) {
         (Some(bind), true) => {
@@ -4139,24 +3893,6 @@ fn allowed_when_locked(action: &Action) -> bool {
     )
 }
 
-fn allowed_during_screenshot(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::Quit(_)
-            | Action::ChangeVt(_)
-            | Action::Suspend
-            | Action::PowerOffMonitors
-            | Action::PowerOnMonitors
-            // The screenshot UI can handle these.
-            | Action::MoveColumnLeft
-            | Action::MoveColumnRight
-            | Action::MoveWindowUp
-            | Action::MoveWindowDown
-            | Action::SetWindowWidth(_)
-            | Action::SetWindowHeight(_)
-            | Action::SetColumnWidth(_)
-    )
-}
 
 fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
     let mods = modifiers_from_state(mods);
@@ -4510,7 +4246,6 @@ mod tests {
         let comp_mod = ModKey::Super;
         let mut suppressed_keys = HashSet::new();
 
-        let screenshot_ui = ScreenshotUi::new(Clock::default(), Default::default());
         let disable_power_key_handling = false;
         let is_inhibiting_shortcuts = Cell::new(false);
 
@@ -4528,7 +4263,6 @@ mod tests {
                 Some(close_keysym),
                 pressed,
                 mods,
-                &screenshot_ui,
                 disable_power_key_handling,
                 is_inhibiting_shortcuts.get(),
             )
@@ -4545,7 +4279,6 @@ mod tests {
                 Some(Keysym::l),
                 pressed,
                 mods,
-                &screenshot_ui,
                 disable_power_key_handling,
                 is_inhibiting_shortcuts.get(),
             )

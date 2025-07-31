@@ -257,14 +257,6 @@ fn render(
         &Action::ToggleOverview,
     ]);
 
-    // Screenshot is not as important, can omit if not bound.
-    if let Some(bind) = binds
-        .iter()
-        .find(|bind| matches!(bind.action, Action::Screenshot(_)))
-    {
-        actions.push(&bind.action);
-    }
-
     // Add actions with a custom hotkey-overlay-title.
     for bind in binds {
         if matches!(bind.hotkey_overlay_title, Some(Some(_))) {
@@ -444,7 +436,6 @@ fn action_name(action: &Action) -> String {
             String::from("Switch Focus Between Floating and Tiling")
         }
         Action::ToggleOverview => String::from("Open the Overview"),
-        Action::Screenshot(_) => String::from("Take a Screenshot"),
         Action::Spawn(args) => format!(
             "Spawn <span face='monospace' bgcolor='#000000'>{}</span>",
             args.first().unwrap_or(&String::new())

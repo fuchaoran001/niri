@@ -18,7 +18,7 @@ use smithay::backend::drm::DrmNode;
 use smithay::backend::input::{InputEvent, TabletToolDescriptor};
 use smithay::desktop::{PopupKind, PopupManager};
 use smithay::input::pointer::{
-    CursorIcon, CursorImageStatus, CursorImageSurfaceData, PointerHandle,
+   CursorImageStatus, CursorImageSurfaceData, PointerHandle,
 };
 use smithay::input::{keyboard, Seat, SeatHandler, SeatState};
 use smithay::output::Output;
@@ -111,12 +111,9 @@ impl SeatHandler for State {
         &mut self.niri.seat_state
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, mut image: CursorImageStatus) {
+    fn cursor_image(&mut self, _seat: &Seat<Self>,image: CursorImageStatus) {
         // FIXME: this hack should be removable once the screenshot UI is tracked with a
         // PointerFocus properly.
-        if self.niri.screenshot_ui.is_open() {
-            image = CursorImageStatus::Named(CursorIcon::Crosshair);
-        }
         self.niri.cursor_manager.set_cursor_image(image);
         // FIXME: more granular
         self.niri.queue_redraw_all();

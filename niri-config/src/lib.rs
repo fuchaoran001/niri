@@ -45,14 +45,6 @@ pub struct Config {
     pub prefer_no_csd: bool,
     #[knuffel(child, default)]
     pub cursor: Cursor,
-    #[knuffel(
-        child,
-        unwrap(argument),
-        default = Some(String::from(
-            "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
-        )))
-    ]
-    pub screenshot_path: Option<String>,
     #[knuffel(child, default)]
     pub clipboard: Clipboard,
     #[knuffel(child, default)]
@@ -1060,8 +1052,6 @@ pub struct Animations {
     #[knuffel(child, default)]
     pub config_notification_open_close: ConfigNotificationOpenCloseAnim,
     #[knuffel(child, default)]
-    pub screenshot_ui_open: ScreenshotUiOpenAnim,
-    #[knuffel(child, default)]
     pub overview_open_close: OverviewOpenCloseAnim,
 }
 
@@ -1077,7 +1067,6 @@ impl Default for Animations {
             window_close: Default::default(),
             window_resize: Default::default(),
             config_notification_open_close: Default::default(),
-            screenshot_ui_open: Default::default(),
             overview_open_close: Default::default(),
         }
     }
@@ -1206,21 +1195,6 @@ impl Default for ConfigNotificationOpenCloseAnim {
                 damping_ratio: 0.6,
                 stiffness: 1000,
                 epsilon: 0.001,
-            }),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ScreenshotUiOpenAnim(pub Animation);
-
-impl Default for ScreenshotUiOpenAnim {
-    fn default() -> Self {
-        Self(Animation {
-            off: false,
-            kind: AnimationKind::Easing(EasingParams {
-                duration_ms: 200,
-                curve: AnimationCurve::EaseOutQuad,
             }),
         })
     }
@@ -1662,25 +1636,6 @@ pub enum Action {
     DebugToggleDamage,
     Spawn(#[knuffel(arguments)] Vec<String>),
     DoScreenTransition(#[knuffel(property(name = "delay-ms"))] Option<u16>),
-    #[knuffel(skip)]
-    ConfirmScreenshot {
-        write_to_disk: bool,
-    },
-    #[knuffel(skip)]
-    CancelScreenshot,
-    #[knuffel(skip)]
-    ScreenshotTogglePointer,
-    Screenshot(#[knuffel(property(name = "show-pointer"), default = true)] bool),
-    ScreenshotScreen(
-        #[knuffel(property(name = "write-to-disk"), default = true)] bool,
-        #[knuffel(property(name = "show-pointer"), default = true)] bool,
-    ),
-    ScreenshotWindow(#[knuffel(property(name = "write-to-disk"), default = true)] bool),
-    #[knuffel(skip)]
-    ScreenshotWindowById {
-        id: u64,
-        write_to_disk: bool,
-    },
     ToggleKeyboardShortcutsInhibit,
     CloseWindow,
     #[knuffel(skip)]
@@ -1898,22 +1853,6 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::PowerOnMonitors {} => Self::PowerOnMonitors,
             niri_ipc::Action::Spawn { command } => Self::Spawn(command),
             niri_ipc::Action::DoScreenTransition { delay_ms } => Self::DoScreenTransition(delay_ms),
-            niri_ipc::Action::Screenshot { show_pointer } => Self::Screenshot(show_pointer),
-            niri_ipc::Action::ScreenshotScreen {
-                write_to_disk,
-                show_pointer,
-            } => Self::ScreenshotScreen(write_to_disk, show_pointer),
-            niri_ipc::Action::ScreenshotWindow {
-                id: None,
-                write_to_disk,
-            } => Self::ScreenshotWindow(write_to_disk),
-            niri_ipc::Action::ScreenshotWindow {
-                id: Some(id),
-                write_to_disk,
-            } => Self::ScreenshotWindowById { id, write_to_disk },
-            niri_ipc::Action::ToggleKeyboardShortcutsInhibit {} => {
-                Self::ToggleKeyboardShortcutsInhibit
-            }
             niri_ipc::Action::CloseWindow { id: None } => Self::CloseWindow,
             niri_ipc::Action::CloseWindow { id: Some(id) } => Self::CloseWindowById(id),
             niri_ipc::Action::FullscreenWindow { id: None } => Self::FullscreenWindow,
@@ -3143,20 +3082,6 @@ where
     }
 }
 
-impl<S> knuffel::Decode<S> for ScreenshotUiOpenAnim
-where
-    S: knuffel::traits::ErrorSpan,
-{
-    fn decode_node(
-        node: &knuffel::ast::SpannedNode<S>,
-        ctx: &mut knuffel::decode::Context<S>,
-    ) -> Result<Self, DecodeError<S>> {
-        let default = Self::default().0;
-        Ok(Self(Animation::decode_node(node, ctx, default, |_, _| {
-            Ok(false)
-        })?))
-    }
-}
 
 impl<S> knuffel::Decode<S> for OverviewOpenCloseAnim
 where
@@ -4045,8 +3970,6 @@ mod tests {
                 hide-after-inactive-ms 3000
             }
 
-            screenshot-path "~/Screenshots/screenshot.png"
-
             clipboard {
                 disable-primary
             }
@@ -4587,9 +4510,6 @@ mod tests {
                     3000,
                 ),
             },
-            screenshot_path: Some(
-                "~/Screenshots/screenshot.png",
-            ),
             clipboard: Clipboard {
                 disable_primary: true,
             },
@@ -4679,17 +4599,6 @@ mod tests {
                                 damping_ratio: 0.6,
                                 stiffness: 1000,
                                 epsilon: 0.001,
-                            },
-                        ),
-                    },
-                ),
-                screenshot_ui_open: ScreenshotUiOpenAnim(
-                    Animation {
-                        off: false,
-                        kind: Easing(
-                            EasingParams {
-                                duration_ms: 200,
-                                curve: EaseOutQuad,
                             },
                         ),
                     },

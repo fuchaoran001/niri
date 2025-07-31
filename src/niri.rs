@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, mem, thread};  
+use std::{env, mem};  
 
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
 use anyhow::{bail, ensure, Context};
@@ -47,7 +47,7 @@ use smithay::desktop::{
 };
 use smithay::input::keyboard::Layout as KeyboardLayout;
 use smithay::input::pointer::{
-    CursorIcon, CursorImageStatus, CursorImageSurfaceData,
+ CursorImageStatus, CursorImageSurfaceData,
      MotionEvent,
 };
 use smithay::input::{Seat, SeatState};
@@ -90,7 +90,7 @@ use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::security_context::SecurityContextState;
-use smithay::wayland::selection::data_device::{set_data_device_selection, DataDeviceState};
+use smithay::wayland::selection::data_device::{ DataDeviceState};
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
@@ -141,20 +141,19 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::{
-    encompassing_geo, render_to_dmabuf, render_to_encompassing_texture, render_to_shm,
-    render_to_texture, render_to_vec, shaders, RenderTarget, SplitElements,
+ render_to_dmabuf, render_to_shm,
+    render_to_texture, shaders, RenderTarget, SplitElements,
 };
 use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::exit_confirm_dialog::ExitConfirmDialog;
 use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::ui::screen_transition::{self, ScreenTransition};
-use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::CHILD_ENV;
 use crate::utils::{
     center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay, is_mapped,
-    logical_output, make_screenshot_path, output_matches_name, output_size, send_scale_transform,
-    write_png_rgba8,
+    logical_output, output_matches_name, output_size, send_scale_transform,
+
 };
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};  
 
@@ -336,7 +335,6 @@ pub struct Niri {
 
     pub lock_state: LockState,  
 
-    pub screenshot_ui: ScreenshotUi,
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
     pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
@@ -858,7 +856,7 @@ impl State {
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();  
 
-        if !self.niri.is_locked() && !self.niri.screenshot_ui.is_open() {
+        if !self.niri.is_locked() {
             // Don't refresh cursor focus during transitions.
             if let Some((output, _)) = self.niri.output_under(location) {
                 let monitor = self.niri.layout.monitor_for_output(output).unwrap();
@@ -981,9 +979,7 @@ impl State {
             KeyboardFocus::LockScreen {
                 surface: self.niri.lock_surface_focus(),
             }
-        } else if self.niri.screenshot_ui.is_open() {
-            KeyboardFocus::ScreenshotUi
-        } else if let Some(output) = self.niri.layout.active_output() {
+        }  else if let Some(output) = self.niri.layout.active_output() {
             let mon = self.niri.layout.monitor_for_output(output).unwrap();
             let layers = layer_map_for_output(output);
 
@@ -1647,75 +1643,6 @@ impl State {
         self.niri.output_management_state.notify_changes(new_config);
     }
 
-    pub fn open_screenshot_ui(&mut self, show_pointer: bool) {
-        if self.niri.is_locked() || self.niri.screenshot_ui.is_open() {
-            return;
-        }
-
-        let default_output = self
-            .niri
-            .output_under_cursor()
-            .or_else(|| self.niri.layout.active_output().cloned());
-        let Some(default_output) = default_output else {
-            return;
-        };
-
-        self.niri.update_render_elements(None);
-
-        let Some(screenshots) = self
-            .backend
-            .with_primary_renderer(|renderer| self.niri.capture_screenshots(renderer).collect())
-        else {
-            return;
-        };
-
-        // Now that we captured the screenshots, clear grabs like drag-and-drop, etc.
-        self.niri.seat.get_pointer().unwrap().unset_grab(
-            self,
-            SERIAL_COUNTER.next_serial(),
-            get_monotonic_time().as_millis() as u32,
-        );
-        if let Some(touch) = self.niri.seat.get_touch() {
-            touch.unset_grab(self);
-        }
-
-        self.backend.with_primary_renderer(|renderer| {
-            self.niri
-                .screenshot_ui
-                .open(renderer, screenshots, default_output, show_pointer)
-        });
-
-        self.niri
-            .cursor_manager
-            .set_cursor_image(CursorImageStatus::Named(CursorIcon::Crosshair));
-        self.niri.queue_redraw_all();
-    }
-
-
-    pub fn confirm_screenshot(&mut self, write_to_disk: bool) {
-        if !self.niri.screenshot_ui.is_open() {
-            return;
-        }
-
-        self.backend.with_primary_renderer(|renderer| {
-            match self.niri.screenshot_ui.capture(renderer) {
-                Ok((size, pixels)) => {
-                    if let Err(err) = self.niri.save_screenshot(size, pixels, write_to_disk) {
-                        warn!("error saving screenshot: {err:?}");
-                    }
-                }
-                Err(err) => {
-                    warn!("error capturing screenshot: {err:?}");
-                }
-            }
-        });
-
-        self.niri.screenshot_ui.close();
-        self.niri
-            .cursor_manager
-            .set_cursor_image(CursorImageStatus::default_named());
-        self.niri.queue_redraw_all();
-    }
 
 }
 
@@ -1895,7 +1822,6 @@ impl Niri {
         let mods_with_wheel_binds = mods_with_wheel_binds(mod_key, &config_.binds);
         let mods_with_finger_scroll_binds = mods_with_finger_scroll_binds(mod_key, &config_.binds);
 
-        let screenshot_ui = ScreenshotUi::new(animation_clock.clone(), config.clone());
         let config_error_notification =
             ConfigErrorNotification::new(animation_clock.clone(), config.clone());
 
@@ -2075,7 +2001,6 @@ impl Niri {
 
             lock_state: LockState::Unlocked,
 
-            screenshot_ui,
             config_error_notification,
             hotkey_overlay,
             exit_confirm_dialog,
@@ -2376,11 +2301,6 @@ impl Niri {
             }
         }
 
-        if self.screenshot_ui.close() {
-            self.cursor_manager
-                .set_cursor_image(CursorImageStatus::default_named());
-            self.queue_redraw_all();
-        }
     }
 
     pub fn output_resized(&mut self, output: &Output) {
@@ -2414,22 +2334,6 @@ impl Niri {
             }
         }
 
-        // If the output size changed with an open screenshot UI, close the screenshot UI.
-        if let Some((old_size, old_scale, old_transform)) = self.screenshot_ui.output_size(output) {
-            let output_mode = output.current_mode().unwrap();
-            let size = transform.transform_size(output_mode.size);
-            let scale = output.current_scale().fractional_scale();
-            // FIXME: scale changes and transform flips shouldn't matter but they currently do since
-            // I haven't quite figured out how to draw the screenshot textures in
-            // physical coordinates.
-            if old_size != size || old_scale != scale || old_transform != transform {
-                self.screenshot_ui.close();
-                self.cursor_manager
-                    .set_cursor_image(CursorImageStatus::default_named());
-                self.queue_redraw_all();
-                return;
-            }
-        }
 
         self.queue_redraw(output);
     }
@@ -2577,7 +2481,7 @@ impl Niri {
         extended_bounds: bool,
         pos: Point<f64, Logical>,
     ) -> Option<(Output, &Workspace<Mapped>)> {
-        if self.is_locked() || self.screenshot_ui.is_open() {
+        if self.is_locked() {
             return None;
         }
 
@@ -2610,7 +2514,7 @@ impl Niri {
     /// The cursor may be inside the window's activation region, but not within the window's input
     /// region.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<&Mapped> {
-        if self.is_locked() || self.screenshot_ui.is_open() {
+        if self.is_locked() {
             return None;
         }
 
@@ -2684,10 +2588,6 @@ impl Niri {
                 )
             });
 
-            return rv;
-        }
-
-        if self.screenshot_ui.is_open() {
             return rv;
         }
 
@@ -3340,7 +3240,7 @@ impl Niri {
 
         self.layout.advance_animations();
         self.config_error_notification.advance_animations();
-        self.screenshot_ui.advance_animations();
+
 
         for state in self.output_state.values_mut() {
             if let Some(transition) = &mut state.screen_transition {
@@ -3479,24 +3379,6 @@ impl Niri {
             Kind::Unspecified,
         )
         .into();
-
-        // If the screenshot UI is open, draw it.
-        if self.screenshot_ui.is_open() {
-            elements.extend(
-                self.screenshot_ui
-                    .render_output(output, target)
-                    .into_iter()
-                    .map(OutputRenderElements::from),
-            );
-
-            // Add the backdrop for outputs that were connected while the screenshot UI was open.
-            elements.push(backdrop);
-
-            if self.debug_draw_opaque_regions {
-                draw_opaque_regions(&mut elements, output_scale);
-            }
-            return elements;
-        }
 
         // Draw the hotkey overlay on top.
         if let Some(element) = self.hotkey_overlay.render(renderer, output) {
@@ -3689,7 +3571,6 @@ impl Niri {
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
             state.unfinished_animations_remain |=
                 self.config_error_notification.are_animations_ongoing();
-            state.unfinished_animations_remain |= self.screenshot_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
 
             // Also keep redrawing if the current cursor is animated.
@@ -4448,216 +4329,6 @@ impl Niri {
         self.queue_redraw_all();
     }
 
-    pub fn capture_screenshots<'a>(
-        &'a self,
-        renderer: &'a mut GlesRenderer,
-    ) -> impl Iterator<Item = (Output, [OutputScreenshot; 3])> + 'a {
-        self.global_space.outputs().cloned().filter_map(|output| {
-            let size = output.current_mode().unwrap().size;
-            let transform = output.current_transform();
-            let size = transform.transform_size(size);
-
-            let scale = Scale::from(output.current_scale().fractional_scale());
-            let targets = [
-                RenderTarget::Output,
-                RenderTarget::Screencast,
-                RenderTarget::ScreenCapture,
-            ];
-            let screenshot = targets.map(|target| {
-                let elements = self.render::<GlesRenderer>(renderer, &output, false, target);
-                let elements = elements.iter().rev();
-
-                let res = render_to_texture(
-                    renderer,
-                    size,
-                    scale,
-                    Transform::Normal,
-                    Fourcc::Abgr8888,
-                    elements,
-                );
-                if let Err(err) = &res {
-                    warn!("error rendering output {}: {err:?}", output.name());
-                }
-                let res_output = res.ok();
-
-                let pointer = self.pointer_element(renderer, &output);
-                let res_pointer = if pointer.is_empty() {
-                    None
-                } else {
-                    let res = render_to_encompassing_texture(
-                        renderer,
-                        scale,
-                        Transform::Normal,
-                        Fourcc::Abgr8888,
-                        &pointer,
-                    );
-                    if let Err(err) = &res {
-                        warn!("error rendering pointer for {}: {err:?}", output.name());
-                    }
-                    res.ok()
-                };
-
-                res_output.map(|(texture, _)| {
-                    OutputScreenshot::from_textures(
-                        renderer,
-                        scale,
-                        texture,
-                        res_pointer.map(|(texture, _, geo)| (texture, geo)),
-                    )
-                })
-            });
-
-            if screenshot.iter().any(|res| res.is_none()) {
-                return None;
-            }
-
-            let screenshot = screenshot.map(|res| res.unwrap());
-            Some((output, screenshot))
-        })
-    }
-
-    pub fn screenshot(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        output: &Output,
-        write_to_disk: bool,
-        include_pointer: bool,
-    ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot");
-
-        self.update_render_elements(Some(output));
-
-        let size = output.current_mode().unwrap().size;
-        let transform = output.current_transform();
-        let size = transform.transform_size(size);
-
-        let scale = Scale::from(output.current_scale().fractional_scale());
-        let elements = self.render::<GlesRenderer>(
-            renderer,
-            output,
-            include_pointer,
-            RenderTarget::ScreenCapture,
-        );
-        let elements = elements.iter().rev();
-        let pixels = render_to_vec(
-            renderer,
-            size,
-            scale,
-            Transform::Normal,
-            Fourcc::Abgr8888,
-            elements,
-        )?;
-
-        self.save_screenshot(size, pixels, write_to_disk)
-            .context("error saving screenshot")
-    }
-
-    pub fn screenshot_window(
-        &self,
-        renderer: &mut GlesRenderer,
-        output: &Output,
-        mapped: &Mapped,
-        write_to_disk: bool,
-    ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot_window");
-
-        let scale = Scale::from(output.current_scale().fractional_scale());
-        let alpha = if mapped.is_fullscreen() || mapped.is_ignoring_opacity_window_rule() {
-            1.
-        } else {
-            mapped.rules().opacity.unwrap_or(1.).clamp(0., 1.)
-        };
-        // FIXME: pointer.
-        let elements = mapped.render(
-            renderer,
-            mapped.window.geometry().loc.to_f64(),
-            scale,
-            alpha,
-            RenderTarget::ScreenCapture,
-        );
-        let geo = encompassing_geo(scale, elements.iter());
-        let elements = elements.iter().rev().map(|elem| {
-            RelocateRenderElement::from_element(elem, geo.loc.upscale(-1), Relocate::Relative)
-        });
-        let pixels = render_to_vec(
-            renderer,
-            geo.size,
-            scale,
-            Transform::Normal,
-            Fourcc::Abgr8888,
-            elements,
-        )?;
-
-        self.save_screenshot(geo.size, pixels, write_to_disk)
-            .context("error saving screenshot")
-    }
-
-    pub fn save_screenshot(
-        &self,
-        size: Size<i32, Physical>,
-        pixels: Vec<u8>,
-        write_to_disk: bool,
-    ) -> anyhow::Result<()> {
-        let path = write_to_disk
-            .then(|| match make_screenshot_path(&self.config.borrow()) {
-                Ok(path) => path,
-                Err(err) => {
-                    warn!("error making screenshot path: {err:?}");
-                    None
-                }
-            })
-            .flatten();
-
-        // Prepare to set the encoded image as our clipboard selection. This must be done from the
-        // main thread.
-        let (tx, rx) = calloop::channel::sync_channel::<Arc<[u8]>>(1);
-        self.event_loop
-            .insert_source(rx, move |event, _, state| match event {
-                calloop::channel::Event::Msg(buf) => {
-                    set_data_device_selection(
-                        &state.niri.display_handle,
-                        &state.niri.seat,
-                        vec![String::from("image/png")],
-                        buf.clone(),
-                    );
-                }
-                calloop::channel::Event::Closed => (),
-            })
-            .unwrap();
-
-        // Encode and save the image in a thread as it's slow.
-        thread::spawn(move || {
-            let mut buf = vec![];
-
-            let w = std::io::Cursor::new(&mut buf);
-            if let Err(err) = write_png_rgba8(w, size.w as u32, size.h as u32, &pixels) {
-                warn!("error encoding screenshot image: {err:?}");
-                return;
-            }
-
-            let buf: Arc<[u8]> = Arc::from(buf.into_boxed_slice());
-            let _ = tx.send(buf.clone());
-
-            if let Some(path) = path {
-                debug!("saving screenshot to {path:?}");
-
-                if let Some(parent) = path.parent() {
-                    if let Err(err) = std::fs::create_dir(parent) {
-                        if err.kind() != std::io::ErrorKind::AlreadyExists {
-                            warn!("error creating screenshot directory: {err:?}");
-                        }
-                    }
-                }
-
-            } else {
-                debug!("not saving screenshot to disk");
-            }
-
-        });
-
-        Ok(())
-    }
-
     pub fn is_locked(&self) -> bool {
         match self.lock_state {
             LockState::Unlocked | LockState::WaitingForSurfaces { .. } => false,
@@ -4698,7 +4369,6 @@ impl Niri {
 
         if self.output_state.is_empty() {
             // There are no outputs, lock the session right away.
-            self.screenshot_ui.close();
             self.cursor_manager
                 .set_cursor_image(CursorImageStatus::default_named());
 
@@ -4758,7 +4428,6 @@ impl Niri {
             } => {
                 self.event_loop.remove(deadline_token);
 
-                self.screenshot_ui.close();
                 self.cursor_manager
                     .set_cursor_image(CursorImageStatus::default_named());
 
@@ -5168,7 +4837,6 @@ niri_render_elements! {
         RelocatedSolidColor = CropRenderElement<RelocateRenderElement<RescaleRenderElement<
             SolidColorRenderElement
         >>>,
-        ScreenshotUi = ScreenshotUiRenderElement,
         Texture = PrimaryGpuTextureRenderElement,
         // Used for the CPU-rendered panels.
         RelocatedMemoryBuffer = RelocateRenderElement<MemoryRenderBufferRenderElement<R>>,
