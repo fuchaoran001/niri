@@ -142,7 +142,6 @@ use crate::render_helpers::{
  render_to_dmabuf, render_to_shm,
     render_to_texture, shaders, RenderTarget, SplitElements,
 };
-use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
@@ -327,7 +326,6 @@ pub struct Niri {
     pub horizontal_finger_scroll_tracker: ScrollTracker,
     pub mods_with_finger_scroll_binds: HashSet<Modifiers>,  
 
-    pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
 
     pub debug_draw_opaque_regions: bool,
@@ -1179,13 +1177,10 @@ impl State {
         let mut config = match config {
             Ok(config) => config,
             Err(()) => {
-                self.niri.config_error_notification.show();
                 self.niri.queue_redraw_all();
                 return;
             }
         };
-
-        self.niri.config_error_notification.hide();
 
         // Find & orphan removed named workspaces.
         let mut removed_workspaces: Vec<String> = vec![];
@@ -1293,16 +1288,6 @@ impl State {
             let src = config.animations.window_resize.custom_shader.as_deref();
             self.backend.with_primary_renderer(|renderer| {
                 shaders::set_custom_resize_program(renderer, src);
-            });
-            shaders_changed = true;
-        }
-
-        if config.animations.window_close.custom_shader
-            != old_config.animations.window_close.custom_shader
-        {
-            let src = config.animations.window_close.custom_shader.as_deref();
-            self.backend.with_primary_renderer(|renderer| {
-                shaders::set_custom_close_program(renderer, src);
             });
             shaders_changed = true;
         }
@@ -1773,9 +1758,6 @@ impl Niri {
         let mods_with_wheel_binds = mods_with_wheel_binds(mod_key, &config_.binds);
         let mods_with_finger_scroll_binds = mods_with_finger_scroll_binds(mod_key, &config_.binds);
 
-        let config_error_notification =
-            ConfigErrorNotification::new(animation_clock.clone(), config.clone());
-
         let mut hotkey_overlay = HotkeyOverlay::new(config.clone(), mod_key);
         if !config_.hotkey_overlay.skip_at_startup {
             hotkey_overlay.show();
@@ -1941,7 +1923,6 @@ impl Niri {
             horizontal_finger_scroll_tracker: ScrollTracker::new(10),
             mods_with_finger_scroll_binds,
 
-            config_error_notification,
             hotkey_overlay,
 
             debug_draw_opaque_regions: false,
@@ -3098,8 +3079,6 @@ impl Niri {
         let _span = tracy_client::span!("Niri::advance_animations");
 
         self.layout.advance_animations();
-        self.config_error_notification.advance_animations();
-
 
         for state in self.output_state.values_mut() {
             if let Some(transition) = &mut state.screen_transition {
@@ -3178,12 +3157,6 @@ impl Niri {
                 elements.push(transition.render(target).into());
             }
         }
-
-        // Next, the config error notification too.
-        if let Some(element) = self.config_error_notification.render(renderer, output) {
-            elements.push(element.into());
-        }
-
 
         // Prepare the background elements.
         let state = self.output_state.get(output).unwrap();
@@ -3391,8 +3364,6 @@ impl Niri {
         if self.monitors_active {
             let state = self.output_state.get_mut(output).unwrap();
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
-            state.unfinished_animations_remain |=
-                self.config_error_notification.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
 
             // Also keep redrawing if the current cursor is animated.

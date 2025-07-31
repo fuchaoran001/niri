@@ -162,8 +162,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 打印启动日志（含版本号）
     info!("starting version {}", &version());
 
-    // 加载配置文件
-    let mut config_created = false;
     // 获取配置路径、监视路径和是否创建默认配置标志
     let (path, watch_path, create_default) = config_path(cli.config);
     // 清除环境变量避免影响子进程
@@ -187,10 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let default = include_bytes!("../resources/default-config.kdl");
                         // 写入默认配置
                         match new_file.write_all(default) {
-                            Ok(()) => {
-                                config_created = true;
-                                info!("wrote default config to {:?}", &path);
-                            }
+                            Ok(()) => info!("wrote default config to {:?}", &path),
                             Err(err) => {
                                 warn!("error writing config file at {:?}: {err:?}", &path)
                             }
@@ -212,8 +207,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 加载配置文件
     let config_load_result = Config::load(&path);
-    // 记录配置是否出错
-    let config_errored = config_load_result.is_err();
     // 处理配置加载结果：出错时使用默认配置并记录警告
     let mut config = config_load_result
         .map_err(|err| warn!("{err:?}"))
@@ -313,13 +306,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // 使用 spawn 函数启动 Alacritty 终端
     spawn(vec!["alacritty".to_string()], None);
-
-    // 显示配置错误通知
-    if config_errored {
-        state.niri.config_error_notification.show();
-    } else if config_created {
-        state.niri.config_error_notification.show_created(path);
-    }
 
     // 主事件循环
     // 流程图：
