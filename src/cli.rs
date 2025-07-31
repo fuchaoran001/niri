@@ -106,9 +106,6 @@ pub enum Msg {
     /// 打印当前聚焦的窗口信息
     FocusedWindow,
     
-    /// 用鼠标选择窗口并打印其信息
-    PickWindow,
-    
     /// 执行合成器动作（如切换工作区）
     Action {
         /// 具体动作类型

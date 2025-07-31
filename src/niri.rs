@@ -156,7 +156,6 @@ use crate::utils::{
     logical_output, make_screenshot_path, output_matches_name, output_size, send_scale_transform,
     write_png_rgba8,
 };
-use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};  
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];  
@@ -342,7 +341,6 @@ pub struct Niri {
     pub hotkey_overlay: HotkeyOverlay,
     pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
 
-    pub pick_window: Option<async_channel::Sender<Option<MappedId>>>,
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
 
@@ -2081,8 +2079,6 @@ impl Niri {
             config_error_notification,
             hotkey_overlay,
             exit_confirm_dialog,
-
-            pick_window: None,
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
