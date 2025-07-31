@@ -62,7 +62,7 @@ use smithay::wayland::selection::wlr_data_control::{
 };
 use smithay::wayland::selection::{SelectionHandler, SelectionTarget};
 use smithay::wayland::session_lock::{
-    LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
+    LockSurface,
 };
 use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::wayland::xdg_activation::{
@@ -74,7 +74,7 @@ use smithay::{
     delegate_idle_inhibit, delegate_idle_notify, delegate_input_method_manager,
     delegate_keyboard_shortcuts_inhibit, delegate_output, delegate_pointer_constraints,
     delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
-    delegate_relative_pointer, delegate_seat, delegate_security_context, delegate_session_lock,
+    delegate_relative_pointer, delegate_seat, delegate_security_context, 
     delegate_single_pixel_buffer, delegate_tablet_manager, delegate_text_input_manager,
     delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_activation,
 };
@@ -440,33 +440,6 @@ impl DmabufHandler for State {
     }
 }
 delegate_dmabuf!(State);
-
-impl SessionLockHandler for State {
-    fn lock_state(&mut self) -> &mut SessionLockManagerState {
-        &mut self.niri.session_lock_state
-    }
-
-    fn lock(&mut self, confirmation: SessionLocker) {
-        self.niri.lock(confirmation);
-    }
-
-    fn unlock(&mut self) {
-        self.niri.unlock();
-        self.niri.activate_monitors(&mut self.backend);
-        self.niri.notify_activity();
-    }
-
-    fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
-        let Some(output) = Output::from_resource(&output) else {
-            warn!("no Output matching WlOutput");
-            return;
-        };
-
-        configure_lock_surface(&surface, &output);
-        self.niri.new_lock_surface(surface, &output);
-    }
-}
-delegate_session_lock!(State);
 
 pub fn configure_lock_surface(surface: &LockSurface, output: &Output) {
     surface.with_pending_state(|states| {

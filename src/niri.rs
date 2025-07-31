@@ -39,7 +39,7 @@ use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, take_presentation_feedback_surface_tree,
-    under_from_surface_tree, update_surface_primary_scanout_output, OutputPresentationFeedback,
+    update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, LayerMap, LayerSurface, PopupGrab, PopupManager,
@@ -57,7 +57,6 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
     Interest, LoopHandle, LoopSignal, Mode, PostAction, RegistrationToken,
 };
-use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
 use smithay::reexports::wayland_protocols_misc::server_decoration as _server_decoration;
 use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
@@ -94,7 +93,6 @@ use smithay::wayland::selection::data_device::{ DataDeviceState};
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
-use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState, SessionLocker};
 use smithay::wayland::shell::kde::decoration::KdeDecorationState;
 use smithay::wayland::shell::wlr_layer::{self, Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
@@ -115,7 +113,7 @@ use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 use crate::frame_clock::FrameClock;
-use crate::handlers::{configure_lock_surface, XDG_ACTIVATION_TOKEN_TIMEOUT};
+use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT};
 use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
 use crate::input::{
@@ -151,13 +149,11 @@ use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::CHILD_ENV;
 use crate::utils::{
-    center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay, is_mapped,
+    center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay,
     logical_output, output_matches_name, output_size, send_scale_transform,
 
 };
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};  
-
-const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];  
 
 // We'll try to send frame callbacks at least once a second. We'll make a timer that fires once a
 // second, so with the worst timing the maximum interval between two frame callbacks for a surface
@@ -244,7 +240,6 @@ pub struct Niri {
     pub xdg_decoration_state: XdgDecorationState,
     pub kde_decoration_state: KdeDecorationState,
     pub layer_shell_state: WlrLayerShellState,
-    pub session_lock_state: SessionLockManagerState,
     pub foreign_toplevel_state: ForeignToplevelManagerState,
     pub screencopy_state: ScreencopyManagerState,
     pub output_management_state: OutputManagementManagerState,
@@ -333,8 +328,6 @@ pub struct Niri {
     pub horizontal_finger_scroll_tracker: ScrollTracker,
     pub mods_with_finger_scroll_binds: HashSet<Modifiers>,  
 
-    pub lock_state: LockState,  
-
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
     pub exit_confirm_dialog: Option<ExitConfirmDialog>,  
@@ -408,9 +401,6 @@ pub struct OutputState {
     /// tracking issues and make screenshots easier.
     pub background_buffer: SolidColorBuffer,
     pub backdrop_buffer: SolidColorBuffer,
-    pub lock_render_state: LockRenderState,
-    pub lock_surface: Option<LockSurface>,
-    pub lock_color_buffer: SolidColorBuffer,
     screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
@@ -463,26 +453,6 @@ pub struct PointContents {
     pub window: Option<(Window, HitType)>,
     // If surface belongs to a layer surface, this is that layer surface.
     pub layer: Option<LayerSurface>,
-}  
-
-#[derive(Debug, Default)]
-pub enum LockState {
-    #[default]
-    Unlocked,
-    WaitingForSurfaces {
-        confirmation: SessionLocker,
-        deadline_token: RegistrationToken,
-    },
-    Locking(SessionLocker),
-    Locked(ExtSessionLockV1),
-}  
-
-#[derive(PartialEq, Eq)]
-pub enum LockRenderState {
-    /// The output displays a normal session frame.
-    Unlocked,
-    /// The output displays a locked frame.
-    Locked,
 }  
 
 // Not related to the one in Smithay.
@@ -854,17 +824,6 @@ impl State {
         let _span = tracy_client::span!("Niri::refresh_pointer_contents");  
 
         let pointer = &self.niri.seat.get_pointer().unwrap();
-        let location = pointer.current_location();  
-
-        if !self.niri.is_locked() {
-            // Don't refresh cursor focus during transitions.
-            if let Some((output, _)) = self.niri.output_under(location) {
-                let monitor = self.niri.layout.monitor_for_output(output).unwrap();
-                if monitor.are_transitions_ongoing() {
-                    return;
-                }
-            }
-        }  
 
         if !self.update_pointer_contents() {
             return;
@@ -975,11 +934,7 @@ impl State {
         }
 
         // Compute the current focus.
-        let focus = if self.niri.is_locked() {
-            KeyboardFocus::LockScreen {
-                surface: self.niri.lock_surface_focus(),
-            }
-        }  else if let Some(output) = self.niri.layout.active_output() {
+        let focus = if let Some(output) = self.niri.layout.active_output() {
             let mon = self.niri.layout.monitor_for_output(output).unwrap();
             let layers = layer_map_for_output(output);
 
@@ -1705,8 +1660,6 @@ impl Niri {
             &display_handle,
             client_is_unrestricted,
         );
-        let session_lock_state =
-            SessionLockManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let shm_state = ShmState::new::<State>(
             &display_handle,
             vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888],
@@ -1932,7 +1885,6 @@ impl Niri {
             xdg_decoration_state,
             kde_decoration_state,
             layer_shell_state,
-            session_lock_state,
             foreign_toplevel_state,
             output_management_state,
             screencopy_state,
@@ -1998,8 +1950,6 @@ impl Niri {
             vertical_finger_scroll_tracker: ScrollTracker::new(10),
             horizontal_finger_scroll_tracker: ScrollTracker::new(10),
             mods_with_finger_scroll_binds,
-
-            lock_state: LockState::Unlocked,
 
             config_error_notification,
             hotkey_overlay,
@@ -2208,13 +2158,6 @@ impl Niri {
 
         self.layout.add_output(output.clone());
 
-        let lock_render_state = if self.is_locked() {
-            // We haven't rendered anything yet so it's as good as locked.
-            LockRenderState::Locked
-        } else {
-            LockRenderState::Unlocked
-        };
-
         let size = output_size(&output);
         let state = OutputState {
             global,
@@ -2226,9 +2169,6 @@ impl Niri {
             frame_callback_sequence: 0,
             background_buffer: SolidColorBuffer::new(size, background_color),
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
-            lock_render_state,
-            lock_surface: None,
-            lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
         };
@@ -2278,29 +2218,6 @@ impl Niri {
             )
             .unwrap();
 
-        match mem::take(&mut self.lock_state) {
-            LockState::Locking(confirmation) => {
-                // We're locking and an output was removed, check if the requirements are now met.
-                let all_locked = self
-                    .output_state
-                    .values()
-                    .all(|state| state.lock_render_state == LockRenderState::Locked);
-
-                if all_locked {
-                    let lock = confirmation.ext_session_lock().clone();
-                    confirmation.lock();
-                    self.lock_state = LockState::Locked(lock);
-                } else {
-                    // Still waiting.
-                    self.lock_state = LockState::Locking(confirmation);
-                }
-            }
-            lock_state => {
-                self.lock_state = lock_state;
-                self.maybe_continue_to_locking();
-            }
-        }
-
     }
 
     pub fn output_resized(&mut self, output: &Output) {
@@ -2327,11 +2244,6 @@ impl Niri {
         if let Some(state) = self.output_state.get_mut(output) {
             state.background_buffer.resize(output_size);
             state.backdrop_buffer.resize(output_size);
-
-            state.lock_color_buffer.resize(output_size);
-            if let Some(lock_surface) = &state.lock_surface {
-                configure_lock_surface(lock_surface, output);
-            }
         }
 
 
@@ -2481,9 +2393,6 @@ impl Niri {
         extended_bounds: bool,
         pos: Point<f64, Logical>,
     ) -> Option<(Output, &Workspace<Mapped>)> {
-        if self.is_locked() {
-            return None;
-        }
 
         let (output, pos_within_output) = self.output_under(pos)?;
 
@@ -2514,9 +2423,6 @@ impl Niri {
     /// The cursor may be inside the window's activation region, but not within the window's input
     /// region.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<&Mapped> {
-        if self.is_locked() {
-            return None;
-        }
 
         let (output, pos_within_output) = self.output_under(pos)?;
 
@@ -2565,31 +2471,6 @@ impl Niri {
 
         // The ordering here must be consistent with the ordering in render() so that input is
         // consistent with the visuals.
-
-        if self.is_locked() {
-            let Some(state) = self.output_state.get(output) else {
-                return rv;
-            };
-            let Some(surface) = state.lock_surface.as_ref() else {
-                return rv;
-            };
-
-            rv.surface = under_from_surface_tree(
-                surface.wl_surface(),
-                pos_within_output,
-                // We put lock surfaces at (0, 0).
-                (0, 0),
-                WindowSurfaceType::ALL,
-            )
-            .map(|(surface, pos_within_output)| {
-                (
-                    surface,
-                    (pos_within_output + output_pos_in_global_space).to_f64(),
-                )
-            });
-
-            return rv;
-        }
 
         let layers = layer_map_for_output(output);
         let layer_surface_under = |layer, popup| {
@@ -2880,17 +2761,6 @@ impl Niri {
                 .is_some()
         };
         self.layout.outputs().find(has_layer_surface)
-    }
-
-    pub fn lock_surface_focus(&self) -> Option<WlSurface> {
-        let output_under_cursor = self.output_under_cursor();
-        let output = output_under_cursor
-            .as_ref()
-            .or_else(|| self.layout.active_output())
-            .or_else(|| self.global_space.outputs().next())?;
-
-        let state = self.output_state.get(output)?;
-        state.lock_surface.as_ref().map(|s| s.wl_surface()).cloned()
     }
 
     /// Schedules an immediate redraw on all outputs if one is not already scheduled.
@@ -3332,36 +3202,6 @@ impl Niri {
             elements.push(element.into());
         }
 
-        // If the session is locked, draw the lock surface.
-        if self.is_locked() {
-            let state = self.output_state.get(output).unwrap();
-            if let Some(surface) = state.lock_surface.as_ref() {
-                elements.extend(render_elements_from_surface_tree(
-                    renderer,
-                    surface.wl_surface(),
-                    (0, 0),
-                    output_scale,
-                    1.,
-                    Kind::Unspecified,
-                ));
-            }
-
-            // Draw the solid color background.
-            elements.push(
-                SolidColorRenderElement::from_buffer(
-                    &state.lock_color_buffer,
-                    (0., 0.),
-                    1.,
-                    Kind::Unspecified,
-                )
-                .into(),
-            );
-
-            if self.debug_draw_opaque_regions {
-                draw_opaque_regions(&mut elements, output_scale);
-            }
-            return elements;
-        }
 
         // Prepare the background elements.
         let state = self.output_state.get(output).unwrap();
@@ -3590,7 +3430,6 @@ impl Niri {
             res = backend.render(self, output, target_presentation_time);
         }
 
-        let is_locked = self.is_locked();
         let state = self.output_state.get_mut(output).unwrap();
 
         if res == RenderResult::Skipped {
@@ -3603,44 +3442,6 @@ impl Niri {
             } else {
                 RedrawState::Idle
             };
-        }
-
-        // Update the lock render state on successful render, or if monitors are inactive. When
-        // monitors are inactive on a TTY, they have no framebuffer attached, so no sensitive data
-        // from a last render will be visible.
-        if res != RenderResult::Skipped || !self.monitors_active {
-            state.lock_render_state = if is_locked {
-                LockRenderState::Locked
-            } else {
-                LockRenderState::Unlocked
-            };
-        }
-
-        // If we're in process of locking the session, check if the requirements were met.
-        match mem::take(&mut self.lock_state) {
-            LockState::Locking(confirmation) => {
-                if state.lock_render_state == LockRenderState::Unlocked {
-                    // We needed to render a locked frame on this output but failed.
-                    self.unlock();
-                } else {
-                    // Check if all outputs are now locked.
-                    let all_locked = self
-                        .output_state
-                        .values()
-                        .all(|state| state.lock_render_state == LockRenderState::Locked);
-
-                    if all_locked {
-                        // All outputs are locked, report success.
-                        let lock = confirmation.ext_session_lock().clone();
-                        confirmation.lock();
-                        self.lock_state = LockState::Locked(lock);
-                    } else {
-                        // Still waiting for other outputs.
-                        self.lock_state = LockState::Locking(confirmation);
-                    }
-                }
-            }
-            lock_state => self.lock_state = lock_state,
         }
 
         self.refresh_on_demand_vrr(backend, output);
@@ -3808,23 +3609,6 @@ impl Niri {
             });
         }
 
-        if let Some(surface) = &self.output_state[output].lock_surface {
-            with_surface_tree_downward(
-                surface.wl_surface(),
-                (),
-                |_, _, _| TraversalAction::DoChildren(()),
-                |surface, states, _| {
-                    update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                },
-                |_, _, _| true,
-            );
-        }
     }
 
     pub fn send_dmabuf_feedbacks(
@@ -3855,22 +3639,6 @@ impl Niri {
 
         for surface in layer_map_for_output(output).layers() {
             surface.send_dmabuf_feedback(
-                output,
-                |_, _| Some(output.clone()),
-                |surface, _| {
-                    select_dmabuf_feedback(
-                        surface,
-                        render_element_states,
-                        &feedback.render,
-                        &feedback.scanout,
-                    )
-                },
-            );
-        }
-
-        if let Some(surface) = &self.output_state[output].lock_surface {
-            send_dmabuf_feedback_surface_tree(
-                surface.wl_surface(),
                 output,
                 |_, _| Some(output.clone()),
                 |surface, _| {
@@ -3976,16 +3744,6 @@ impl Niri {
             );
         }
 
-        if let Some(surface) = &self.output_state[output].lock_surface {
-            send_frames_surface_tree(
-                surface.wl_surface(),
-                output,
-                frame_callback_time,
-                FRAME_CALLBACK_THROTTLE,
-                should_send,
-            );
-        }
-
         if let Some(surface) = self.dnd_icon.as_ref().map(|icon| &icon.surface) {
             send_frames_surface_tree(
                 surface,
@@ -4033,7 +3791,7 @@ impl Niri {
             );
         });
 
-        for (output, state) in self.output_state.iter() {
+        for (output, _state) in self.output_state.iter() {
             for surface in layer_map_for_output(output).layers() {
                 surface.send_frame(
                     output,
@@ -4043,15 +3801,6 @@ impl Niri {
                 );
             }
 
-            if let Some(surface) = &state.lock_surface {
-                send_frames_surface_tree(
-                    surface.wl_surface(),
-                    output,
-                    frame_callback_time,
-                    FRAME_CALLBACK_THROTTLE,
-                    |_, _| None,
-                );
-            }
         }
 
         if let Some(surface) = &self.dnd_icon.as_ref().map(|icon| &icon.surface) {
@@ -4116,17 +3865,6 @@ impl Niri {
 
         for surface in layer_map_for_output(output).layers() {
             surface.take_presentation_feedback(
-                &mut feedback,
-                surface_primary_scanout_output,
-                |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
-                },
-            );
-        }
-
-        if let Some(surface) = &self.output_state[output].lock_surface {
-            take_presentation_feedback_surface_tree(
-                surface.wl_surface(),
                 &mut feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
@@ -4327,154 +4065,6 @@ impl Niri {
         }
 
         self.queue_redraw_all();
-    }
-
-    pub fn is_locked(&self) -> bool {
-        match self.lock_state {
-            LockState::Unlocked | LockState::WaitingForSurfaces { .. } => false,
-            LockState::Locking(_) | LockState::Locked(_) => true,
-        }
-    }
-
-    pub fn lock(&mut self, confirmation: SessionLocker) {
-        // Check if another client is in the process of locking.
-        if matches!(
-            self.lock_state,
-            LockState::WaitingForSurfaces { .. } | LockState::Locking(_)
-        ) {
-            info!("refusing lock as another client is currently locking");
-            return;
-        }
-
-        // Check if we're already locked with an active client.
-        if let LockState::Locked(lock) = &self.lock_state {
-            if lock.is_alive() {
-                info!("refusing lock as already locked with an active client");
-                return;
-            }
-
-            // If the client had died, continue with the new lock.
-            info!("locking session (replacing existing dead lock)");
-
-            // Since the session was already locked, we know that the outputs are blanked, and
-            // can lock right away.
-            let lock = confirmation.ext_session_lock().clone();
-            confirmation.lock();
-            self.lock_state = LockState::Locked(lock);
-
-            return;
-        }
-
-        info!("locking session");
-
-        if self.output_state.is_empty() {
-            // There are no outputs, lock the session right away.
-            self.cursor_manager
-                .set_cursor_image(CursorImageStatus::default_named());
-
-            let lock = confirmation.ext_session_lock().clone();
-            confirmation.lock();
-            self.lock_state = LockState::Locked(lock);
-        } else {
-            // There are outputs which we need to redraw before locking. But before we do that,
-            // let's wait for the lock surfaces.
-            //
-            // Give them a second; swaylock can take its time to paint a big enough image.
-            let timer = Timer::from_duration(Duration::from_millis(1000));
-            let deadline_token = self
-                .event_loop
-                .insert_source(timer, |_, _, state| {
-                    trace!("lock deadline expired, continuing");
-                    state.niri.continue_to_locking();
-                    TimeoutAction::Drop
-                })
-                .unwrap();
-
-            self.lock_state = LockState::WaitingForSurfaces {
-                confirmation,
-                deadline_token,
-            };
-        }
-    }
-
-    pub fn maybe_continue_to_locking(&mut self) {
-        if !matches!(self.lock_state, LockState::WaitingForSurfaces { .. }) {
-            // Not waiting.
-            return;
-        }
-
-        // Check if there are any outputs whose lock surfaces had not had a commit yet.
-        for state in self.output_state.values() {
-            let Some(surface) = &state.lock_surface else {
-                // Surface not created yet.
-                return;
-            };
-
-            if !is_mapped(surface.wl_surface()) {
-                return;
-            }
-        }
-
-        // All good.
-        trace!("lock surfaces are ready, continuing");
-        self.continue_to_locking();
-    }
-
-    fn continue_to_locking(&mut self) {
-        match mem::take(&mut self.lock_state) {
-            LockState::WaitingForSurfaces {
-                confirmation,
-                deadline_token,
-            } => {
-                self.event_loop.remove(deadline_token);
-
-                self.cursor_manager
-                    .set_cursor_image(CursorImageStatus::default_named());
-
-                if self.output_state.is_empty() {
-                    // There are no outputs, lock the session right away.
-                    let lock = confirmation.ext_session_lock().clone();
-                    confirmation.lock();
-                    self.lock_state = LockState::Locked(lock);
-                } else {
-                    // There are outputs which we need to redraw before locking.
-                    self.lock_state = LockState::Locking(confirmation);
-                    self.queue_redraw_all();
-                }
-            }
-            other => {
-                error!("continue_to_locking() called with wrong lock state: {other:?}",);
-                self.lock_state = other;
-            }
-        }
-    }
-
-    pub fn unlock(&mut self) {
-        info!("unlocking session");
-
-        let prev = mem::take(&mut self.lock_state);
-        if let LockState::WaitingForSurfaces { deadline_token, .. } = prev {
-            self.event_loop.remove(deadline_token);
-        }
-
-        for output_state in self.output_state.values_mut() {
-            output_state.lock_surface = None;
-        }
-        self.queue_redraw_all();
-    }
-
-    pub fn new_lock_surface(&mut self, surface: LockSurface, output: &Output) {
-        if matches!(self.lock_state, LockState::Unlocked) {
-            error!("tried to add a lock surface on an unlocked session");
-            return;
-        }
-
-        let Some(output_state) = self.output_state.get_mut(output) else {
-            error!("missing output state");
-            return;
-        };
-
-        output_state.lock_surface = Some(surface);
     }
 
     /// Activates the pointer constraint if necessary according to the current pointer contents.

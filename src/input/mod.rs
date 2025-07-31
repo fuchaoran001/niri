@@ -572,14 +572,9 @@ impl State {
 
     pub fn handle_bind(&mut self, bind: Bind) {
         let Some(cooldown) = bind.cooldown else {
-            self.do_action(bind.action, bind.allow_when_locked);
+            self.do_action(bind.action);
             return;
         };
-
-        // Check this first so that it doesn't trigger the cooldown.
-        if self.niri.is_locked() && !(bind.allow_when_locked || allowed_when_locked(&bind.action)) {
-            return;
-        }
 
         match self.niri.bind_cooldown_timers.entry(bind.key) {
             // The bind is on cooldown.
@@ -598,16 +593,13 @@ impl State {
                     .unwrap();
                 entry.insert(token);
 
-                self.do_action(bind.action, bind.allow_when_locked);
+                self.do_action(bind.action);
             }
         }
     }
 
-    pub fn do_action(&mut self, action: Action, allow_when_locked: bool) {
-        if self.niri.is_locked() && !(allow_when_locked || allowed_when_locked(&action)) {
-            return;
-        }
-
+    pub fn do_action(&mut self, action: Action) {
+ 
         if let Some(touch) = self.niri.seat.get_touch() {
             touch.cancel(self);
         }
@@ -3629,7 +3621,7 @@ impl State {
         };
 
         if let Some(action) = action {
-            self.do_action(action, true);
+            self.do_action(action);
         }
     }
 }
@@ -3877,19 +3869,6 @@ fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>)
             | InputEvent::TabletToolButton { .. }
             | InputEvent::TabletToolProximity { .. }
             | InputEvent::TabletToolTip { .. }
-    )
-}
-
-fn allowed_when_locked(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::Quit(_)
-            | Action::ChangeVt(_)
-            | Action::Suspend
-            | Action::PowerOffMonitors
-            | Action::PowerOnMonitors
-            | Action::SwitchLayout(_)
-            | Action::ToggleKeyboardShortcutsInhibit
     )
 }
 
