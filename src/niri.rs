@@ -280,16 +280,6 @@ pub struct Niri {
     pub gamma_control_manager_state: GammaControlManagerState,
     pub activation_state: XdgActivationState,
     pub mutter_x11_interop_state: MutterX11InteropManagerState,  
-
-    // This will not work as is outside of tests, so it is gated with #[cfg(test)] for now. In
-    // particular, shaders will need to learn about the single pixel buffer. Also, it must be
-    // verified that a black single-pixel-buffer background lets the foreground surface to be
-    // unredirected.
-    //
-    // https://github.com/YaLTeR/niri/issues/619
-    #[cfg(test)]
-    pub single_pixel_buffer_state: SinglePixelBufferState,  
-
     pub seat: Seat<State>,
     /// Scancodes of the keys to suppress.
     pub suppressed_keys: HashSet<Keycode>,
@@ -1888,10 +1878,6 @@ impl Niri {
 
         let mutter_x11_interop_state =
             MutterX11InteropManagerState::new::<State, _>(&display_handle, move |_| true);
-
-        #[cfg(test)]
-        let single_pixel_buffer_state = SinglePixelBufferState::new::<State>(&display_handle);
-
         let mut seat: Seat<State> = seat_state.new_wl_seat(&display_handle, backend.seat_name());
         let keyboard = match seat.add_keyboard(
             config_.input.keyboard.xkb.to_xkb_config(),
@@ -2077,9 +2063,6 @@ impl Niri {
             gamma_control_manager_state,
             activation_state,
             mutter_x11_interop_state,
-            #[cfg(test)]
-            single_pixel_buffer_state,
-
             seat,
             keyboard_focus: KeyboardFocus::Layout { surface: None },
             layer_shell_on_demand_focus: None,
