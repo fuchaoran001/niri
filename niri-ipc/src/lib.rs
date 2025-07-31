@@ -195,12 +195,6 @@ pub enum Action {
         #[cfg_attr(feature = "clap", arg(last = true, required = true))]
         command: Vec<String>,
     },
-    /// Do a screen transition.
-    DoScreenTransition {
-        /// Delay in milliseconds for the screen to freeze before starting the transition.
-        #[cfg_attr(feature = "clap", arg(short, long))]
-        delay_ms: Option<u16>,
-    },
 
 
     /// Close a window.

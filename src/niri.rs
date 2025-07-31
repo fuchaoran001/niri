@@ -17,7 +17,6 @@ use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, PreviewRender, TrackLayout,
     WarpMouseToFocusMode, WorkspaceReference,
 };
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
@@ -136,13 +135,11 @@ use crate::render_helpers::debug::draw_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
-use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::{
  render_to_dmabuf, render_to_shm,
-    render_to_texture, shaders, RenderTarget, SplitElements,
+    shaders, RenderTarget, SplitElements,
 };
 use crate::ui::hotkey_overlay::HotkeyOverlay;
-use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::CHILD_ENV;
 use crate::utils::{
@@ -395,7 +392,6 @@ pub struct OutputState {
     /// tracking issues and make screenshots easier.
     pub background_buffer: SolidColorBuffer,
     pub backdrop_buffer: SolidColorBuffer,
-    screen_transition: Option<ScreenTransition>,
     /// Damage tracker used for the debug damage visualization.
     pub debug_damage_tracker: OutputDamageTracker,
 }  
@@ -583,12 +579,6 @@ impl State {
         let _span = tracy_client::span!("State::refresh_and_flush_clients");  
 
         self.refresh();  
-
-        // Advance animations to the current time (not target render time) before rendering outputs
-        // in order to clear completed animations and render elements. Even if we're not rendering,
-        // it's good to advance every now and then so the workspace clean-up and animations don't
-        // build up (the 1 second frame callback timer will call this line).
-        self.niri.advance_animations();  
 
         self.niri.redraw_queued_outputs(&mut self.backend);  
 
@@ -2134,7 +2124,6 @@ impl Niri {
             frame_callback_sequence: 0,
             background_buffer: SolidColorBuffer::new(size, background_color),
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
-            screen_transition: None,
             debug_damage_tracker: OutputDamageTracker::from_output(&output),
         };
         let rv = self.output_state.insert(output.clone(), state);
@@ -3070,31 +3059,13 @@ impl Niri {
         }
     }
 
-    pub fn advance_animations(&mut self) {
-        let _span = tracy_client::span!("Niri::advance_animations");
-
-        self.layout.advance_animations();
-
-        for state in self.output_state.values_mut() {
-            if let Some(transition) = &mut state.screen_transition {
-                if transition.is_done() {
-                    state.screen_transition = None;
-                }
-            }
-        }
-    }
-
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
         self.layout.update_render_elements(output);
 
-        for (out, state) in self.output_state.iter_mut() {
+        for (out, _state) in self.output_state.iter_mut() {
             if output.map_or(true, |output| out == output) {
-                let scale = Scale::from(out.current_scale().fractional_scale());
-                let transform = out.current_transform();
-
-                if let Some(transition) = &mut state.screen_transition {
-                    transition.update_render_elements(scale, transform);
-                }
+                let _scale = Scale::from(out.current_scale().fractional_scale());
+                let _transform = out.current_transform();
 
                 let layer_map = layer_map_for_output(out);
                 for surface in layer_map.layers() {
@@ -3147,10 +3118,7 @@ impl Niri {
 
         // Next, the screen transition texture.
         {
-            let state = self.output_state.get(output).unwrap();
-            if let Some(transition) = &state.screen_transition {
-                elements.push(transition.render(target).into());
-            }
+            let _state = self.output_state.get(output).unwrap();
         }
 
         // Prepare the background elements.
@@ -3359,7 +3327,6 @@ impl Niri {
         if self.monitors_active {
             let state = self.output_state.get_mut(output).unwrap();
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
-            state.unfinished_animations_remain |= state.screen_transition.is_some();
 
             // Also keep redrawing if the current cursor is animated.
             state.unfinished_animations_remain |= self
@@ -4143,81 +4110,6 @@ impl Niri {
                 self.layer_shell_on_demand_focus = Some(layer.clone());
             }
         }
-    }
-
-    pub fn do_screen_transition(&mut self, renderer: &mut GlesRenderer, delay_ms: Option<u16>) {
-        let _span = tracy_client::span!("Niri::do_screen_transition");
-
-        self.update_render_elements(None);
-
-        let textures: Vec<_> = self
-            .output_state
-            .keys()
-            .cloned()
-            .filter_map(|output| {
-                let size = output.current_mode().unwrap().size;
-                let transform = output.current_transform();
-
-                let scale = Scale::from(output.current_scale().fractional_scale());
-                let targets = [
-                    RenderTarget::Output,
-                    RenderTarget::Screencast,
-                    RenderTarget::ScreenCapture,
-                ];
-                let textures = targets.map(|target| {
-                    let elements = self.render::<GlesRenderer>(renderer, &output, false, target);
-                    let elements = elements.iter().rev();
-
-                    let res = render_to_texture(
-                        renderer,
-                        size,
-                        scale,
-                        transform,
-                        Fourcc::Abgr8888,
-                        elements,
-                    );
-
-                    if let Err(err) = &res {
-                        warn!("error rendering output {}: {err:?}", output.name());
-                    }
-
-                    res
-                });
-
-                if textures.iter().any(|res| res.is_err()) {
-                    return None;
-                }
-
-                let textures = textures.map(|res| {
-                    let texture = res.unwrap().0;
-                    TextureBuffer::from_texture(
-                        renderer,
-                        texture,
-                        scale,
-                        transform,
-                        Vec::new(), // We want windows below to get frame callbacks.
-                    )
-                });
-
-                Some((output, textures))
-            })
-            .collect();
-
-        let delay = delay_ms.map_or(screen_transition::DELAY, |d| {
-            Duration::from_millis(u64::from(d))
-        });
-
-        for (output, from_texture) in textures {
-            let state = self.output_state.get_mut(&output).unwrap();
-            state.screen_transition = Some(ScreenTransition::new(
-                from_texture,
-                delay,
-                self.clock.clone(),
-            ));
-        }
-
-        // We don't actually need to queue a redraw because the point is to freeze the screen for a
-        // bit, and even if the delay was zero, we're drawing the same contents anyway.
     }
 
     pub fn recompute_window_rules(&mut self) {

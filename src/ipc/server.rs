@@ -342,7 +342,6 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             ctx.event_loop.insert_idle(move |state| {
                 // Make sure some logic like workspace clean-up has a chance to run before doing
                 // actions.
-                state.niri.advance_animations();
                 state.do_action(action);
                 let _ = tx.send_blocking(());
             });

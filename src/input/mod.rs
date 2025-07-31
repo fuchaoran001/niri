@@ -168,9 +168,6 @@ impl State {
     {
         let _span = tracy_client::span!("process_input_event");
 
-        // Make sure some logic like workspace clean-up has a chance to run before doing actions.
-        self.niri.advance_animations();
-
         if self.niri.monitors_active {
             // Notify the idle-notifier of activity.
             if should_notify_activity(&event) {
@@ -615,11 +612,6 @@ impl State {
             Action::Spawn(command) => {
                 let (token, _) = self.niri.activation_state.create_external_token(None);
                 spawn(command, Some(token.clone()));
-            }
-            Action::DoScreenTransition(delay_ms) => {
-                self.backend.with_primary_renderer(|renderer| {
-                    self.niri.do_screen_transition(renderer, delay_ms);
-                });
             }
             Action::ToggleKeyboardShortcutsInhibit => {
                 if let Some(inhibitor) = self.niri.keyboard_focus.surface().and_then(|surface| {
