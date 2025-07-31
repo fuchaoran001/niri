@@ -132,7 +132,6 @@ use crate::protocols::gamma_control::GammaControlManagerState;
 use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
-use crate::protocols::virtual_pointer::VirtualPointerManagerState;
 use crate::render_helpers::debug::draw_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -253,7 +252,6 @@ pub struct Niri {
     pub input_method_state: InputMethodManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub virtual_keyboard_state: VirtualKeyboardManagerState,
-    pub virtual_pointer_state: VirtualPointerManagerState,
     pub pointer_gestures_state: PointerGesturesState,
     pub relative_pointer_state: RelativePointerManagerState,
     pub pointer_constraints_state: PointerConstraintsState,
@@ -1689,8 +1687,6 @@ impl Niri {
             KeyboardShortcutsInhibitState::new::<State>(&display_handle);
         let virtual_keyboard_state =
             VirtualKeyboardManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let virtual_pointer_state =
-            VirtualPointerManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let foreign_toplevel_state =
             ForeignToplevelManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let mut output_management_state =
@@ -1866,7 +1862,6 @@ impl Niri {
             input_method_state,
             keyboard_shortcuts_inhibit_state,
             virtual_keyboard_state,
-            virtual_pointer_state,
             shm_state,
             output_manager_state,
             dmabuf_state,
