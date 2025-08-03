@@ -102,7 +102,7 @@ use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
-use smithay::wayland::xdg_foreign::XdgForeignState;  
+
 
 use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
@@ -231,7 +231,6 @@ pub struct Niri {
     pub foreign_toplevel_state: ForeignToplevelManagerState,
     pub output_management_state: OutputManagementManagerState,
     pub viewporter_state: ViewporterState,
-    pub xdg_foreign_state: XdgForeignState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
     pub dmabuf_state: DmabufState,
@@ -1652,7 +1651,6 @@ impl Niri {
             OutputManagementManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         output_management_state.on_config_changed(config_.outputs.clone());
         let viewporter_state = ViewporterState::new::<State>(&display_handle);
-        let xdg_foreign_state = XdgForeignState::new::<State>(&display_handle);
 
         let is_tty = matches!(backend, Backend::Tty(_));
         let gamma_control_manager_state =
@@ -1808,7 +1806,6 @@ impl Niri {
             foreign_toplevel_state,
             output_management_state,
             viewporter_state,
-            xdg_foreign_state,
             text_input_state,
             input_method_state,
             keyboard_shortcuts_inhibit_state,

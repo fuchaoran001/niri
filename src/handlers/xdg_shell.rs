@@ -32,9 +32,8 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
-use smithay::wayland::xdg_foreign::{XdgForeignHandler, XdgForeignState};
 use smithay::{
-    delegate_kde_decoration, delegate_xdg_decoration, delegate_xdg_foreign, delegate_xdg_shell,
+    delegate_kde_decoration, delegate_xdg_decoration, delegate_xdg_shell,
 };
 use tracing::field::Empty;
 
@@ -814,13 +813,6 @@ impl KdeDecorationHandler for State {
     }
 }
 delegate_kde_decoration!(State);
-
-impl XdgForeignHandler for State {
-    fn xdg_foreign_state(&mut self) -> &mut XdgForeignState {
-        &mut self.niri.xdg_foreign_state
-    }
-}
-delegate_xdg_foreign!(State);
 
 impl State {
     pub fn send_initial_configure(&mut self, toplevel: &ToplevelSurface) {
