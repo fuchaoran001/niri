@@ -79,44 +79,34 @@
 
 //     实时响应：支持动画过渡和即时界面更新
 
-use std::any::Any;
 use std::cmp::min;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::time::Duration;
 
 use calloop::timer::{TimeoutAction, Timer};
-use input::event::gesture::GestureEventCoordinates as _;
 use niri_config::{Action, Bind, Binds, Key, ModKey, Modifiers, SwitchBinds, Trigger};
 use niri_ipc::LayoutSwitchTarget;
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, DeviceCapability, Event,
-    GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, Event,
     InputEvent, KeyState, KeyboardKeyEvent, Keycode, MouseButton, PointerAxisEvent,
-    PointerButtonEvent, PointerMotionEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-    TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-    TabletToolTipState, TouchEvent,
+    PointerButtonEvent, PointerMotionEvent, Switch, SwitchState, SwitchToggleEvent,
 };
 use smithay::backend::libinput::LibinputInputBackend;
 use smithay::input::keyboard::{keysyms, FilterResult, Keysym, Layout, ModifiersState};
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GestureHoldBeginEvent,
-    GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-    GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus,
     GrabStartData as PointerGrabStartData, MotionEvent, RelativeMotionEvent,
 };
 use smithay::input::touch::{
-    DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent, UpEvent,
+    GrabStartData as TouchGrabStartData,
 };
 use smithay::input::SeatHandler;
 use smithay::output::Output;
-use smithay::utils::{Logical, Point, Rectangle, Size, Transform, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::selection::data_device::DnDGrab;
-use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
-use touch_move_grab::TouchMoveGrab;
-use touch_overview_grab::TouchOverviewGrab;
 
 use self::move_grab::MoveGrab;
 use self::resize_grab::ResizeGrab;
@@ -193,25 +183,9 @@ impl State {
             PointerMotionAbsolute { event } => self.on_pointer_motion_absolute::<I>(event),
             PointerButton { event } => self.on_pointer_button::<I>(event),
             PointerAxis { event } => self.on_pointer_axis::<I>(event),
-            TabletToolAxis { event } => self.on_tablet_tool_axis::<I>(event),
-            TabletToolTip { event } => self.on_tablet_tool_tip::<I>(event),
-            TabletToolProximity { event } => self.on_tablet_tool_proximity::<I>(event),
-            TabletToolButton { event } => self.on_tablet_tool_button::<I>(event),
-            GestureSwipeBegin { event } => self.on_gesture_swipe_begin::<I>(event),
-            GestureSwipeUpdate { event } => self.on_gesture_swipe_update::<I>(event),
-            GestureSwipeEnd { event } => self.on_gesture_swipe_end::<I>(event),
-            GesturePinchBegin { event } => self.on_gesture_pinch_begin::<I>(event),
-            GesturePinchUpdate { event } => self.on_gesture_pinch_update::<I>(event),
-            GesturePinchEnd { event } => self.on_gesture_pinch_end::<I>(event),
-            GestureHoldBegin { event } => self.on_gesture_hold_begin::<I>(event),
-            GestureHoldEnd { event } => self.on_gesture_hold_end::<I>(event),
-            TouchDown { event } => self.on_touch_down::<I>(event),
-            TouchMotion { event } => self.on_touch_motion::<I>(event),
-            TouchUp { event } => self.on_touch_up::<I>(event),
-            TouchCancel { event } => self.on_touch_cancel::<I>(event),
-            TouchFrame { event } => self.on_touch_frame::<I>(event),
             SwitchToggle { event } => self.on_switch_toggle::<I>(event),
             Special(_) => (),
+            _ => {},
         }
     }
 
@@ -221,19 +195,6 @@ impl State {
         match event {
             InputEvent::DeviceAdded { device } => {
                 self.niri.devices.insert(device.clone());
-
-                if device.has_capability(input::DeviceCapability::TabletTool) {
-                    match device.size() {
-                        Some((w, h)) => {
-                            let aspect_ratio = w / h;
-                            let data = TabletData { aspect_ratio };
-                            self.niri.tablets.insert(device.clone(), data);
-                        }
-                        None => {
-                            warn!("tablet tool device has no size");
-                        }
-                    }
-                }
 
                 if device.has_capability(input::DeviceCapability::Keyboard) {
                     if let Some(led_state) = self
@@ -246,48 +207,21 @@ impl State {
                     }
                 }
 
-                if device.has_capability(input::DeviceCapability::Touch) {
-                    self.niri.touch.insert(device.clone());
-                }
-
                 apply_libinput_settings(&self.niri.config.borrow().input, device);
             }
             InputEvent::DeviceRemoved { device } => {
-                self.niri.touch.remove(device);
-                self.niri.tablets.remove(device);
                 self.niri.devices.remove(device);
             }
             _ => (),
         }
     }
 
-    fn on_device_added(&mut self, device: impl Device) {
-        if device.has_capability(DeviceCapability::TabletTool) {
-            let tablet_seat = self.niri.seat.tablet_seat();
+    fn on_device_added(&mut self, _device: impl Device) {
 
-            let desc = TabletDescriptor::from(&device);
-            tablet_seat.add_tablet::<Self>(&self.niri.display_handle, &desc);
-        }
-        if device.has_capability(DeviceCapability::Touch) && self.niri.seat.get_touch().is_none() {
-            self.niri.seat.add_touch();
-        }
     }
 
-    fn on_device_removed(&mut self, device: impl Device) {
-        if device.has_capability(DeviceCapability::TabletTool) {
-            let tablet_seat = self.niri.seat.tablet_seat();
+    fn on_device_removed(&mut self, _device: impl Device) {
 
-            let desc = TabletDescriptor::from(&device);
-            tablet_seat.remove_tablet(&desc);
-
-            // If there are no tablets in seat we can remove all tools
-            if tablet_seat.count_tablets() == 0 {
-                tablet_seat.clear_tools();
-            }
-        }
-        if device.has_capability(DeviceCapability::Touch) && self.niri.touch.is_empty() {
-            self.niri.seat.remove_touch();
-        }
     }
 
     /// Computes the rectangle that covers all outputs in global space.
@@ -303,72 +237,6 @@ impl State {
         )
     }
 
-    /// Computes the cursor position for the tablet event.
-    ///
-    /// This function handles the tablet output mapping, as well as coordinate clamping and aspect
-    /// ratio correction.
-    fn compute_tablet_position<I: InputBackend>(
-        &self,
-        event: &(impl Event<I> + TabletToolEvent<I>),
-    ) -> Option<Point<f64, Logical>>
-    where
-        I::Device: 'static,
-    {
-        let device_output = event.device().output(self);
-        let device_output = device_output.as_ref();
-        let (target_geo, keep_ratio, px, transform) =
-            if let Some(output) = device_output.or_else(|| self.niri.output_for_tablet()) {
-                (
-                    self.niri.global_space.output_geometry(output).unwrap(),
-                    true,
-                    1. / output.current_scale().fractional_scale(),
-                    output.current_transform(),
-                )
-            } else {
-                let geo = self.global_bounding_rectangle()?;
-
-                // FIXME: this 1 px size should ideally somehow be computed for the rightmost output
-                // corresponding to the position on the right when clamping.
-                let output = self.niri.global_space.outputs().next().unwrap();
-                let scale = output.current_scale().fractional_scale();
-
-                // Do not keep ratio for the unified mode as this is what OpenTabletDriver expects.
-                (geo, false, 1. / scale, Transform::Normal)
-            };
-
-        let mut pos = {
-            let size = transform.invert().transform_size(target_geo.size);
-            transform.transform_point_in(event.position_transformed(size), &size.to_f64())
-        };
-
-        if keep_ratio {
-            pos.x /= target_geo.size.w as f64;
-            pos.y /= target_geo.size.h as f64;
-
-            let device = event.device();
-            if let Some(device) = (&device as &dyn Any).downcast_ref::<input::Device>() {
-                if let Some(data) = self.niri.tablets.get(device) {
-                    // This code does the same thing as mutter with "keep aspect ratio" enabled.
-                    let size = transform.invert().transform_size(target_geo.size);
-                    let output_aspect_ratio = size.w as f64 / size.h as f64;
-                    let ratio = data.aspect_ratio / output_aspect_ratio;
-
-                    if ratio > 1. {
-                        pos.x *= ratio;
-                    } else {
-                        pos.y /= ratio;
-                    }
-                }
-            };
-
-            pos.x *= target_geo.size.w as f64;
-            pos.y *= target_geo.size.h as f64;
-        }
-
-        pos.x = pos.x.clamp(0.0, target_geo.size.w as f64 - px);
-        pos.y = pos.y.clamp(0.0, target_geo.size.h as f64 - px);
-        Some(pos + target_geo.loc.to_f64())
-    }
 
     fn is_inhibiting_shortcuts(&self) -> bool {
         self.niri
@@ -519,12 +387,6 @@ impl State {
             return;
         }
 
-        // niri keeps this set only while actively using a tablet, which means the cursor position
-        // is likely to change almost immediately, causing pointer_visibility to just flicker back
-        // and forth.
-        if self.niri.tablet_cursor_location.is_some() {
-            return;
-        }
 
         self.niri.pointer_visibility = PointerVisibility::Hidden;
         self.niri.queue_redraw_all();
@@ -1934,7 +1796,6 @@ impl State {
 
         // We received an event for the regular pointer, so show it now.
         self.niri.pointer_visibility = PointerVisibility::Visible;
-        self.niri.tablet_cursor_location = None;
 
         // Check if we have an active pointer constraint.
         //
@@ -2172,9 +2033,6 @@ impl State {
         // We moved the pointer, show it.
         self.niri.pointer_visibility = PointerVisibility::Visible;
 
-        // We moved the regular pointer, so show it now.
-        self.niri.tablet_cursor_location = None;
-
         // Inform the layout of an ongoing DnD operation.
         let mut is_dnd_grab = false;
         pointer.with_grab(|_, grab| {
@@ -2236,7 +2094,6 @@ impl State {
 
             // We received an event for the regular pointer, so show it now.
             self.niri.pointer_visibility = PointerVisibility::Visible;
-            self.niri.tablet_cursor_location = None;
 
             let is_overview_open = self.niri.layout.is_overview_open();
 
@@ -2491,7 +2348,6 @@ impl State {
         // update_pointer_contents() below to return the real contents, necessary for the pointer
         // axis event to reach the window.
         self.niri.pointer_visibility = PointerVisibility::Visible;
-        self.niri.tablet_cursor_location = None;
 
         let timestamp = Duration::from_micros(event.time());
 
@@ -2777,62 +2633,7 @@ impl State {
                 }
             }
 
-            if self.niri.mods_with_finger_scroll_binds.contains(&modifiers) {
-                let ticks = self
-                    .niri
-                    .horizontal_finger_scroll_tracker
-                    .accumulate(horizontal);
-                if ticks != 0 {
-                    let config = self.niri.config.borrow();
-                    let bindings = &config.binds;
-                    let bind_left =
-                        find_configured_bind(bindings, mod_key, Trigger::TouchpadScrollLeft, mods);
-                    let bind_right =
-                        find_configured_bind(bindings, mod_key, Trigger::TouchpadScrollRight, mods);
-                    drop(config);
 
-                    if let Some(right) = bind_right {
-                        for _ in 0..ticks {
-                            self.handle_bind(right.clone());
-                        }
-                    }
-                    if let Some(left) = bind_left {
-                        for _ in ticks..0 {
-                            self.handle_bind(left.clone());
-                        }
-                    }
-                }
-
-                let ticks = self
-                    .niri
-                    .vertical_finger_scroll_tracker
-                    .accumulate(vertical);
-                if ticks != 0 {
-                    let config = self.niri.config.borrow();
-                    let bindings = &config.binds;
-                    let bind_up =
-                        find_configured_bind(bindings, mod_key, Trigger::TouchpadScrollUp, mods);
-                    let bind_down =
-                        find_configured_bind(bindings, mod_key, Trigger::TouchpadScrollDown, mods);
-                    drop(config);
-
-                    if let Some(down) = bind_down {
-                        for _ in 0..ticks {
-                            self.handle_bind(down.clone());
-                        }
-                    }
-                    if let Some(up) = bind_up {
-                        for _ in ticks..0 {
-                            self.handle_bind(up.clone());
-                        }
-                    }
-                }
-
-                return;
-            } else {
-                self.niri.horizontal_finger_scroll_tracker.reset();
-                self.niri.vertical_finger_scroll_tracker.reset();
-            }
         }
 
         self.update_pointer_contents();
@@ -2894,465 +2695,6 @@ impl State {
         pointer.frame(self);
     }
 
-    fn on_tablet_tool_axis<I: InputBackend>(&mut self, event: I::TabletToolAxisEvent)
-    where
-        I::Device: 'static, // Needed for downcasting.
-    {
-        let Some(pos) = self.compute_tablet_position(&event) else {
-            return;
-        };
-
-        let under = self.niri.contents_under(pos);
-
-        let tablet_seat = self.niri.seat.tablet_seat();
-        let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
-        let tool = tablet_seat.get_tool(&event.tool());
-        if let (Some(tablet), Some(tool)) = (tablet, tool) {
-            if event.pressure_has_changed() {
-                tool.pressure(event.pressure());
-            }
-            if event.distance_has_changed() {
-                tool.distance(event.distance());
-            }
-            if event.tilt_has_changed() {
-                tool.tilt(event.tilt());
-            }
-            if event.slider_has_changed() {
-                tool.slider_position(event.slider_position());
-            }
-            if event.rotation_has_changed() {
-                tool.rotation(event.rotation());
-            }
-            if event.wheel_has_changed() {
-                tool.wheel(event.wheel_delta(), event.wheel_delta_discrete());
-            }
-
-            tool.motion(
-                pos,
-                under.surface,
-                &tablet,
-                SERIAL_COUNTER.next_serial(),
-                event.time_msec(),
-            );
-
-            self.niri.pointer_visibility = PointerVisibility::Visible;
-            self.niri.tablet_cursor_location = Some(pos);
-        }
-
-        // Redraw to update the cursor position.
-        // FIXME: redraw only outputs overlapping the cursor.
-        self.niri.queue_redraw_all();
-    }
-
-    fn on_tablet_tool_tip<I: InputBackend>(&mut self, event: I::TabletToolTipEvent) {
-        let tool = self.niri.seat.tablet_seat().get_tool(&event.tool());
-
-        let Some(tool) = tool else {
-            return;
-        };
-        let tip_state = event.tip_state();
-
-        let is_overview_open = self.niri.layout.is_overview_open();
-
-        match tip_state {
-            TabletToolTipState::Down => {
-                let serial = SERIAL_COUNTER.next_serial();
-                tool.tip_down(serial, event.time_msec());
-
-                if let Some(pos) = self.niri.tablet_cursor_location {
-                    let under = self.niri.contents_under(pos);
-
-                    if let Some((window, _)) = under.window {
-                        if let Some(output) = is_overview_open.then_some(under.output).flatten() {
-                            let mut workspaces = self.niri.layout.workspaces();
-                            if let Some(ws_idx) = workspaces.find_map(|(_, ws_idx, ws)| {
-                                ws.windows().any(|w| w.window == window).then_some(ws_idx)
-                            }) {
-                                drop(workspaces);
-                                self.niri.layout.focus_output(&output);
-                                self.niri.layout.toggle_overview_to_workspace(ws_idx);
-                            }
-                        }
-
-                        self.niri.layout.activate_window(&window);
-
-                        // FIXME: granular.
-                        self.niri.queue_redraw_all();
-                    } else if let Some((output, ws)) = is_overview_open
-                        .then(|| self.niri.workspace_under(false, pos))
-                        .flatten()
-                    {
-                        let ws_idx = self.niri.layout.find_workspace_by_id(ws.id()).unwrap().0;
-
-                        self.niri.layout.focus_output(&output);
-                        self.niri.layout.toggle_overview_to_workspace(ws_idx);
-
-                        // FIXME: granular.
-                        self.niri.queue_redraw_all();
-                    } else if let Some(output) = under.output {
-                        self.niri.layout.focus_output(&output);
-
-                        // FIXME: granular.
-                        self.niri.queue_redraw_all();
-                    }
-                    self.niri.focus_layer_surface_if_on_demand(under.layer);
-                }
-            }
-            TabletToolTipState::Up => {
-
-                tool.tip_up(event.time_msec());
-            }
-        }
-    }
-
-    fn on_tablet_tool_proximity<I: InputBackend>(&mut self, event: I::TabletToolProximityEvent)
-    where
-        I::Device: 'static, // Needed for downcasting.
-    {
-        let Some(pos) = self.compute_tablet_position(&event) else {
-            return;
-        };
-
-        let under = self.niri.contents_under(pos);
-
-        let tablet_seat = self.niri.seat.tablet_seat();
-        let display_handle = self.niri.display_handle.clone();
-        let tool = tablet_seat.add_tool::<Self>(self, &display_handle, &event.tool());
-        let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
-        if let Some(tablet) = tablet {
-            match event.state() {
-                ProximityState::In => {
-                    if let Some(under) = under.surface {
-                        tool.proximity_in(
-                            pos,
-                            under,
-                            &tablet,
-                            SERIAL_COUNTER.next_serial(),
-                            event.time_msec(),
-                        );
-                    }
-                    self.niri.pointer_visibility = PointerVisibility::Visible;
-                    self.niri.tablet_cursor_location = Some(pos);
-                }
-                ProximityState::Out => {
-                    tool.proximity_out(event.time_msec());
-
-                    // Move the mouse pointer here to avoid discontinuity.
-                    //
-                    // Plus, Wayland SDL2 currently warps the pointer into some weird
-                    // location on proximity out, so this should help it a little.
-                    if let Some(pos) = self.niri.tablet_cursor_location {
-                        self.move_cursor(pos);
-                    }
-
-                    self.niri.pointer_visibility = PointerVisibility::Visible;
-                    self.niri.tablet_cursor_location = None;
-                }
-            }
-
-            // FIXME: granular.
-            self.niri.queue_redraw_all();
-        }
-    }
-
-    fn on_tablet_tool_button<I: InputBackend>(&mut self, event: I::TabletToolButtonEvent) {
-        let tool = self.niri.seat.tablet_seat().get_tool(&event.tool());
-
-        if let Some(tool) = tool {
-            tool.button(
-                event.button(),
-                event.button_state(),
-                SERIAL_COUNTER.next_serial(),
-                event.time_msec(),
-            );
-        }
-    }
-
-    fn on_gesture_swipe_begin<I: InputBackend>(&mut self, event: I::GestureSwipeBeginEvent) {
-        if event.fingers() == 3 {
-            self.niri.gesture_swipe_3f_cumulative = Some((0., 0.));
-
-            // We handled this event.
-            return;
-        } else if event.fingers() == 4 {
-            self.niri.layout.overview_gesture_begin();
-            self.niri.queue_redraw_all();
-
-            // We handled this event.
-            return;
-        }
-
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_swipe_begin(
-            self,
-            &GestureSwipeBeginEvent {
-                serial,
-                time: event.time_msec(),
-                fingers: event.fingers(),
-            },
-        );
-    }
-
-    fn on_gesture_swipe_update<I: InputBackend + 'static>(
-        &mut self,
-        event: I::GestureSwipeUpdateEvent,
-    ) where
-        I::Device: 'static,
-    {
-        let mut delta_x = event.delta_x();
-        let mut delta_y = event.delta_y();
-
-        if let Some(libinput_event) =
-            (&event as &dyn Any).downcast_ref::<input::event::gesture::GestureSwipeUpdateEvent>()
-        {
-            delta_x = libinput_event.dx_unaccelerated();
-            delta_y = libinput_event.dy_unaccelerated();
-        }
-
-        let uninverted_delta_y = delta_y;
-
-        let device = event.device();
-        if let Some(device) = (&device as &dyn Any).downcast_ref::<input::Device>() {
-            if device.config_scroll_natural_scroll_enabled() {
-                delta_x = -delta_x;
-                delta_y = -delta_y;
-            }
-        }
-
-        let is_overview_open = self.niri.layout.is_overview_open();
-
-        if let Some((cx, cy)) = &mut self.niri.gesture_swipe_3f_cumulative {
-            *cx += delta_x;
-            *cy += delta_y;
-
-            // Check if the gesture moved far enough to decide. Threshold copied from GNOME Shell.
-            let (cx, cy) = (*cx, *cy);
-            if cx * cx + cy * cy >= 16. * 16. {
-                self.niri.gesture_swipe_3f_cumulative = None;
-
-                if let Some(output) = self.niri.output_under_cursor() {
-                    if cx.abs() > cy.abs() {
-                        let output_ws = if is_overview_open {
-                            self.niri.workspace_under_cursor(true)
-                        } else {
-                            // We don't want to accidentally "catch" the wrong workspace during
-                            // animations.
-                            self.niri.output_under_cursor().and_then(|output| {
-                                let mon = self.niri.layout.monitor_for_output(&output)?;
-                                Some((output, mon.active_workspace_ref()))
-                            })
-                        };
-
-                        if let Some((output, ws)) = output_ws {
-                            let ws_idx = self.niri.layout.find_workspace_by_id(ws.id()).unwrap().0;
-                            self.niri
-                                .layout
-                                .view_offset_gesture_begin(&output, Some(ws_idx), true);
-                        }
-                    } else {
-                        self.niri
-                            .layout
-                            .workspace_switch_gesture_begin(&output, true);
-                    }
-                }
-            }
-        }
-
-        let timestamp = Duration::from_micros(event.time());
-
-        let mut handled = false;
-        let res = self
-            .niri
-            .layout
-            .workspace_switch_gesture_update(delta_y, timestamp, true);
-        if let Some(output) = res {
-            if let Some(output) = output {
-                self.niri.queue_redraw(&output);
-            }
-            handled = true;
-        }
-
-        let res = self
-            .niri
-            .layout
-            .view_offset_gesture_update(delta_x, timestamp, true);
-        if let Some(output) = res {
-            if let Some(output) = output {
-                self.niri.queue_redraw(&output);
-            }
-            handled = true;
-        }
-
-        let res = self
-            .niri
-            .layout
-            .overview_gesture_update(-uninverted_delta_y, timestamp);
-        if let Some(redraw) = res {
-            if redraw {
-                self.niri.queue_redraw_all();
-            }
-            handled = true;
-        }
-
-        if handled {
-            // We handled this event.
-            return;
-        }
-
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_swipe_update(
-            self,
-            &GestureSwipeUpdateEvent {
-                time: event.time_msec(),
-                delta: event.delta(),
-            },
-        );
-    }
-
-    fn on_gesture_swipe_end<I: InputBackend>(&mut self, event: I::GestureSwipeEndEvent) {
-        self.niri.gesture_swipe_3f_cumulative = None;
-
-        let mut handled = false;
-        let res = self.niri.layout.workspace_switch_gesture_end(Some(true));
-        if let Some(output) = res {
-            self.niri.queue_redraw(&output);
-            handled = true;
-        }
-
-        let res = self.niri.layout.view_offset_gesture_end(Some(true));
-        if let Some(output) = res {
-            self.niri.queue_redraw(&output);
-            handled = true;
-        }
-
-        let res = self.niri.layout.overview_gesture_end();
-        if res {
-            self.niri.queue_redraw_all();
-            handled = true;
-        }
-
-        if handled {
-            // We handled this event.
-            return;
-        }
-
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_swipe_end(
-            self,
-            &GestureSwipeEndEvent {
-                serial,
-                time: event.time_msec(),
-                cancelled: event.cancelled(),
-            },
-        );
-    }
-
-    fn on_gesture_pinch_begin<I: InputBackend>(&mut self, event: I::GesturePinchBeginEvent) {
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_pinch_begin(
-            self,
-            &GesturePinchBeginEvent {
-                serial,
-                time: event.time_msec(),
-                fingers: event.fingers(),
-            },
-        );
-    }
-
-    fn on_gesture_pinch_update<I: InputBackend>(&mut self, event: I::GesturePinchUpdateEvent) {
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_pinch_update(
-            self,
-            &GesturePinchUpdateEvent {
-                time: event.time_msec(),
-                delta: event.delta(),
-                scale: event.scale(),
-                rotation: event.rotation(),
-            },
-        );
-    }
-
-    fn on_gesture_pinch_end<I: InputBackend>(&mut self, event: I::GesturePinchEndEvent) {
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_pinch_end(
-            self,
-            &GesturePinchEndEvent {
-                serial,
-                time: event.time_msec(),
-                cancelled: event.cancelled(),
-            },
-        );
-    }
-
-    fn on_gesture_hold_begin<I: InputBackend>(&mut self, event: I::GestureHoldBeginEvent) {
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_hold_begin(
-            self,
-            &GestureHoldBeginEvent {
-                serial,
-                time: event.time_msec(),
-                fingers: event.fingers(),
-            },
-        );
-    }
-
-    fn on_gesture_hold_end<I: InputBackend>(&mut self, event: I::GestureHoldEndEvent) {
-        let serial = SERIAL_COUNTER.next_serial();
-        let pointer = self.niri.seat.get_pointer().unwrap();
-
-        if self.update_pointer_contents() {
-            pointer.frame(self);
-        }
-
-        pointer.gesture_hold_end(
-            self,
-            &GestureHoldEndEvent {
-                serial,
-                time: event.time_msec(),
-                cancelled: event.cancelled(),
-            },
-        );
-    }
 
     fn compute_absolute_location<I: InputBackend>(
         &self,
@@ -3370,179 +2712,6 @@ impl State {
         )
     }
 
-    /// Computes the cursor position for the touch event.
-    ///
-    /// This function handles the touch output mapping, as well as coordinate transform
-    fn compute_touch_location<I: InputBackend>(
-        &self,
-        evt: &impl AbsolutePositionEvent<I>,
-    ) -> Option<Point<f64, Logical>> {
-        self.compute_absolute_location(evt, self.niri.output_for_touch())
-    }
-
-    fn on_touch_down<I: InputBackend>(&mut self, evt: I::TouchDownEvent) {
-        let Some(handle) = self.niri.seat.get_touch() else {
-            return;
-        };
-        let Some(pos) = self.compute_touch_location(&evt) else {
-            return;
-        };
-        let slot = evt.slot();
-
-        let serial = SERIAL_COUNTER.next_serial();
-
-        let under = self.niri.contents_under(pos);
-
-        let mod_key = self.backend.mod_key(&self.niri.config.borrow());
-
-        if !handle.is_grabbed() {
-            let mods = self.niri.seat.get_keyboard().unwrap().modifier_state();
-            let mods = modifiers_from_state(mods);
-            let mod_down = mods.contains(mod_key.to_modifiers());
-
-            if self.niri.layout.is_overview_open()
-                && !mod_down
-                && under.layer.is_none()
-                && under.output.is_some()
-            {
-                let (output, pos_within_output) = self.niri.output_under(pos).unwrap();
-                let output = output.clone();
-
-                let mut matched_narrow = true;
-                let mut ws = self.niri.workspace_under(false, pos);
-                if ws.is_none() {
-                    matched_narrow = false;
-                    ws = self.niri.workspace_under(true, pos);
-                }
-                let ws_id = ws.map(|(_, ws)| ws.id());
-
-                let mapped = self.niri.window_under(pos);
-                let window = mapped.map(|mapped| mapped.window.clone());
-
-                let start_data = TouchGrabStartData {
-                    focus: None,
-                    slot,
-                    location: pos,
-                };
-                let start_timestamp = Duration::from_micros(evt.time());
-                let grab = TouchOverviewGrab::new(
-                    start_data,
-                    start_timestamp,
-                    output,
-                    pos_within_output,
-                    ws_id,
-                    matched_narrow,
-                    window,
-                );
-                handle.set_grab(self, grab, serial);
-            } else if let Some((window, _)) = under.window {
-                self.niri.layout.activate_window(&window);
-
-                // Check if we need to start an interactive move.
-                if mod_down {
-                    let (output, pos_within_output) = self.niri.output_under(pos).unwrap();
-                    let output = output.clone();
-
-                    if self.niri.layout.interactive_move_begin(
-                        window.clone(),
-                        &output,
-                        pos_within_output,
-                    ) {
-                        let start_data = TouchGrabStartData {
-                            focus: None,
-                            slot,
-                            location: pos,
-                        };
-                        let grab = TouchMoveGrab::new(start_data, window.clone());
-                        handle.set_grab(self, grab, serial);
-                    }
-                }
-
-                // FIXME: granular.
-                self.niri.queue_redraw_all();
-            } else if let Some(output) = under.output {
-                self.niri.layout.focus_output(&output);
-
-                // FIXME: granular.
-                self.niri.queue_redraw_all();
-            }
-            self.niri.focus_layer_surface_if_on_demand(under.layer);
-        };
-
-        handle.down(
-            self,
-            under.surface,
-            &DownEvent {
-                slot,
-                location: pos,
-                serial,
-                time: evt.time_msec(),
-            },
-        );
-
-        // We're using touch, hide the pointer.
-        self.niri.pointer_visibility = PointerVisibility::Disabled;
-    }
-    fn on_touch_up<I: InputBackend>(&mut self, evt: I::TouchUpEvent) {
-        let Some(handle) = self.niri.seat.get_touch() else {
-            return;
-        };
-        let slot = evt.slot();
-
-        let serial = SERIAL_COUNTER.next_serial();
-        handle.up(
-            self,
-            &UpEvent {
-                slot,
-                serial,
-                time: evt.time_msec(),
-            },
-        )
-    }
-    fn on_touch_motion<I: InputBackend>(&mut self, evt: I::TouchMotionEvent) {
-        let Some(handle) = self.niri.seat.get_touch() else {
-            return;
-        };
-        let Some(pos) = self.compute_touch_location(&evt) else {
-            return;
-        };
-        let slot = evt.slot();
-
-        let under = self.niri.contents_under(pos);
-        handle.motion(
-            self,
-            under.surface,
-            &TouchMotionEvent {
-                slot,
-                location: pos,
-                time: evt.time_msec(),
-            },
-        );
-
-        // Inform the layout of an ongoing DnD operation.
-        let mut is_dnd_grab = false;
-        handle.with_grab(|_, grab| {
-            is_dnd_grab = grab.as_any().downcast_ref::<DnDGrab<Self>>().is_some();
-        });
-        if is_dnd_grab {
-            if let Some((output, pos_within_output)) = self.niri.output_under(pos) {
-                let output = output.clone();
-                self.niri.layout.dnd_update(output, pos_within_output);
-            }
-        }
-    }
-    fn on_touch_frame<I: InputBackend>(&mut self, _evt: I::TouchFrameEvent) {
-        let Some(handle) = self.niri.seat.get_touch() else {
-            return;
-        };
-        handle.frame(self);
-    }
-    fn on_touch_cancel<I: InputBackend>(&mut self, _evt: I::TouchCancelEvent) {
-        let Some(handle) = self.niri.seat.get_touch() else {
-            return;
-        };
-        handle.cancel(self);
-    }
 
     fn on_switch_toggle<I: InputBackend>(&mut self, evt: I::SwitchToggleEvent) {
         let Some(switch) = evt.switch() else {
@@ -3747,16 +2916,7 @@ fn should_activate_monitors<I: InputBackend>(event: &InputEvent<I>) -> bool {
         InputEvent::PointerButton { event } if event.state() == ButtonState::Pressed => true,
         InputEvent::PointerMotion { .. }
         | InputEvent::PointerMotionAbsolute { .. }
-        | InputEvent::PointerAxis { .. }
-        | InputEvent::GestureSwipeBegin { .. }
-        | InputEvent::GesturePinchBegin { .. }
-        | InputEvent::GestureHoldBegin { .. }
-        | InputEvent::TouchDown { .. }
-        | InputEvent::TouchMotion { .. }
-        | InputEvent::TabletToolAxis { .. }
-        | InputEvent::TabletToolProximity { .. }
-        | InputEvent::TabletToolTip { .. }
-        | InputEvent::TabletToolButton { .. } => true,
+        | InputEvent::PointerAxis { .. } => true,
         // Ignore events like device additions and removals, key releases, gesture ends.
         _ => false,
     }
@@ -4048,18 +3208,6 @@ pub fn mods_with_wheel_binds(mod_key: ModKey, binds: &Binds) -> HashSet<Modifier
     )
 }
 
-pub fn mods_with_finger_scroll_binds(mod_key: ModKey, binds: &Binds) -> HashSet<Modifiers> {
-    mods_with_binds(
-        mod_key,
-        binds,
-        &[
-            Trigger::TouchpadScrollUp,
-            Trigger::TouchpadScrollDown,
-            Trigger::TouchpadScrollLeft,
-            Trigger::TouchpadScrollRight,
-        ],
-    )
-}
 
 #[cfg(test)]
 mod tests {

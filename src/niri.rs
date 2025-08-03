@@ -97,7 +97,6 @@ use smithay::wayland::shm::ShmState;
 #[cfg(test)]
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::socket::ListeningSocketSource;
-use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
@@ -113,8 +112,8 @@ use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT};
 use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
 use crate::input::{
-    apply_libinput_settings, mods_with_finger_scroll_binds, mods_with_mouse_binds,
-    mods_with_wheel_binds, TabletData,
+    apply_libinput_settings, mods_with_mouse_binds,
+    mods_with_wheel_binds,
 };
 use crate::ipc::server::IpcServer;
 use crate::layer::mapped::LayerSurfaceRenderElement;
@@ -218,9 +217,7 @@ pub struct Niri {
     /// startup, libinput will immediately send a closed event.
     pub is_lid_closed: bool,  
 
-    pub devices: HashSet<input::Device>,
-    pub tablets: HashMap<input::Device, TabletData>,
-    pub touch: HashSet<input::Device>,  
+    pub devices: HashSet<input::Device>, 
 
     // Smithay state.
     pub compositor_state: CompositorState,
@@ -236,7 +233,6 @@ pub struct Niri {
     pub dmabuf_state: DmabufState,
     pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub seat_state: SeatState<State>,
-    pub tablet_state: TabletManagerState,
     pub text_input_state: TextInputManagerState,
     pub input_method_state: InputMethodManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
@@ -302,17 +298,12 @@ pub struct Niri {
     /// resolution mice.
     pub notified_activity_this_iteration: bool,
     pub pointer_inside_hot_corner: bool,
-    pub tablet_cursor_location: Option<Point<f64, Logical>>,
     pub gesture_swipe_3f_cumulative: Option<(f64, f64)>,
     pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
     pub vertical_wheel_tracker: ScrollTracker,
     pub horizontal_wheel_tracker: ScrollTracker,
     pub mods_with_mouse_binds: HashSet<Modifiers>,
     pub mods_with_wheel_binds: HashSet<Modifiers>,
-    pub vertical_finger_scroll_tracker: ScrollTracker,
-    pub horizontal_finger_scroll_tracker: ScrollTracker,
-    pub mods_with_finger_scroll_binds: HashSet<Modifiers>,  
-
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
 
@@ -701,10 +692,6 @@ impl State {
 
     pub fn move_cursor_to_focused_tile(&mut self, mode: CenterCoords) -> bool {
         if !self.niri.keyboard_focus.is_layout() {
-            return false;
-        }  
-
-        if self.niri.tablet_cursor_location.is_some() {
             return false;
         }  
 
@@ -1424,10 +1411,6 @@ impl State {
 
         self.niri.reposition_outputs(None);
 
-        if let Some(touch) = self.niri.seat.get_touch() {
-            touch.cancel(self);
-        }
-
         let config = self.niri.config.borrow().outputs.clone();
         self.niri.output_management_state.on_config_changed(config);
     }
@@ -1609,7 +1592,6 @@ impl Niri {
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<State>(&display_handle);
         let mut seat_state = SeatState::new();
-        let tablet_state = TabletManagerState::new::<State>(&display_handle);
         let pointer_gestures_state = PointerGesturesState::new::<State>(&display_handle);
         let relative_pointer_state = RelativePointerManagerState::new::<State>(&display_handle);
         let pointer_constraints_state = PointerConstraintsState::new::<State>(&display_handle);
@@ -1707,7 +1689,6 @@ impl Niri {
         let mod_key = backend.mod_key(&config.borrow());
         let mods_with_mouse_binds = mods_with_mouse_binds(mod_key, &config_.binds);
         let mods_with_wheel_binds = mods_with_wheel_binds(mod_key, &config_.binds);
-        let mods_with_finger_scroll_binds = mods_with_finger_scroll_binds(mod_key, &config_.binds);
 
         event_loop
             .insert_source(
@@ -1795,8 +1776,6 @@ impl Niri {
             is_lid_closed: false,
 
             devices: HashSet::new(),
-            tablets: HashMap::new(),
-            touch: HashSet::new(),
 
             compositor_state,
             xdg_shell_state,
@@ -1815,7 +1794,6 @@ impl Niri {
             dmabuf_state,
             fractional_scale_manager_state,
             seat_state,
-            tablet_state,
             pointer_gestures_state,
             relative_pointer_state,
             pointer_constraints_state,
@@ -1853,7 +1831,6 @@ impl Niri {
             pointer_inactivity_timer_got_reset: false,
             notified_activity_this_iteration: false,
             pointer_inside_hot_corner: false,
-            tablet_cursor_location: None,
             gesture_swipe_3f_cumulative: None,
             overview_scroll_swipe_gesture: ScrollSwipeGesture::new(),
             vertical_wheel_tracker: ScrollTracker::new(120),
@@ -1861,10 +1838,6 @@ impl Niri {
             mods_with_mouse_binds,
             mods_with_wheel_binds,
 
-            // 10 is copied from Clutter: DISCRETE_SCROLL_STEP.
-            vertical_finger_scroll_tracker: ScrollTracker::new(10),
-            horizontal_finger_scroll_tracker: ScrollTracker::new(10),
-            mods_with_finger_scroll_binds,
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
@@ -2632,20 +2605,6 @@ impl Niri {
             .cloned()
     }
 
-    pub fn output_for_tablet(&self) -> Option<&Output> {
-        let config = self.config.borrow();
-        let map_to_output = config.input.tablet.map_to_output.as_ref();
-        map_to_output.and_then(|name| self.output_by_name_match(name))
-    }
-
-    pub fn output_for_touch(&self) -> Option<&Output> {
-        let config = self.config.borrow();
-        let map_to_output = config.input.touch.map_to_output.as_ref();
-        map_to_output
-            .and_then(|name| self.output_by_name_match(name))
-            .or_else(|| self.global_space.outputs().next())
-    }
-
     pub fn output_by_name_match(&self, target: &str) -> Option<&Output> {
         self.global_space
             .outputs()
@@ -2711,9 +2670,7 @@ impl Niri {
         let output_pos = self.global_space.output_geometry(output).unwrap().loc;
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
-        let pointer_pos = self
-            .tablet_cursor_location
-            .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+        let pointer_pos = self.seat.get_pointer().unwrap().current_location();
         let pointer_pos = pointer_pos - output_pos.to_f64();
 
         // Get the render cursor to draw.
@@ -2796,9 +2753,7 @@ impl Niri {
         let _span = tracy_client::span!("Niri::refresh_pointer_outputs");
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
-        let pointer_pos = self
-            .tablet_cursor_location
-            .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+        let pointer_pos = self.seat.get_pointer().unwrap().current_location();
 
         match self.cursor_manager.cursor_image() {
             CursorImageStatus::Surface(ref surface) => {
