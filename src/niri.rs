@@ -135,9 +135,6 @@ use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 // 共享内存
 use smithay::wayland::shm::ShmState;
-// 单像素缓冲区（测试用）
-#[cfg(test)]
-use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 // Wayland套接字监听
 use smithay::wayland::socket::ListeningSocketSource;
 // 文本输入
