@@ -84,12 +84,10 @@ use crate::niri::{DndIcon, NewClient, State};
 use crate::protocols::foreign_toplevel::{
     self, ForeignToplevelHandler, ForeignToplevelManagerState,
 };
-use crate::protocols::gamma_control::{GammaControlHandler, GammaControlManagerState};
-use crate::protocols::mutter_x11_interop::MutterX11InteropHandler;
 use crate::protocols::output_management::{OutputManagementHandler, OutputManagementManagerState};
 use crate::utils::{output_size, send_scale_transform, with_toplevel_role};
 use crate::{
-    delegate_foreign_toplevel, delegate_gamma_control, delegate_mutter_x11_interop,
+    delegate_foreign_toplevel,
     delegate_output_management,
 };
 
@@ -590,37 +588,6 @@ delegate_drm_lease!(State);
 
 delegate_viewporter!(State);
 
-impl GammaControlHandler for State {
-    fn gamma_control_manager_state(&mut self) -> &mut GammaControlManagerState {
-        &mut self.niri.gamma_control_manager_state
-    }
-
-    fn get_gamma_size(&mut self, output: &Output) -> Option<u32> {
-        match self.backend.tty().get_gamma_size(output) {
-            Ok(0) => None, // Setting gamma is not supported.
-            Ok(size) => Some(size),
-            Err(err) => {
-                warn!(
-                    "error getting gamma size for output {}: {err:?}",
-                    output.name()
-                );
-                None
-            }
-        }
-    }
-
-    fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> Option<()> {
-        match self.backend.tty().set_gamma(output, ramp) {
-            Ok(()) => Some(()),
-            Err(err) => {
-                warn!("error setting gamma for output {}: {err:?}", output.name());
-                None
-            }
-        }
-    }
-}
-delegate_gamma_control!(State);
-
 struct UrgentOnlyMarker;
 
 impl XdgActivationHandler for State {
@@ -709,8 +676,5 @@ impl OutputManagementHandler for State {
     }
 }
 delegate_output_management!(State);
-
-impl MutterX11InteropHandler for State {}
-delegate_mutter_x11_interop!(State);
 
 delegate_single_pixel_buffer!(State);

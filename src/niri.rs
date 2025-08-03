@@ -122,8 +122,6 @@ use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{HitType, Layout, LayoutElement as _, MonitorRenderElement};
 use crate::niri_render_elements;
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
-use crate::protocols::gamma_control::GammaControlManagerState;
-use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::render_helpers::debug::draw_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
@@ -249,9 +247,7 @@ pub struct Niri {
     pub popup_grab: Option<PopupGrabState>,
     pub presentation_state: PresentationState,
     pub security_context_state: SecurityContextState,
-    pub gamma_control_manager_state: GammaControlManagerState,
-    pub activation_state: XdgActivationState,
-    pub mutter_x11_interop_state: MutterX11InteropManagerState,  
+    pub activation_state: XdgActivationState,  
     pub seat: Seat<State>,
     /// Scancodes of the keys to suppress.
     pub suppressed_keys: HashSet<Keycode>,
@@ -1631,11 +1627,7 @@ impl Niri {
         output_management_state.on_config_changed(config_.outputs.clone());
         let viewporter_state = ViewporterState::new::<State>(&display_handle);
 
-        let is_tty = matches!(backend, Backend::Tty(_));
-        let gamma_control_manager_state =
-            GammaControlManagerState::new::<State, _>(&display_handle, move |client| {
-                is_tty && !client.get_data::<ClientState>().unwrap().restricted
-            });
+        let _is_tty = matches!(backend, Backend::Tty(_));
         let activation_state = XdgActivationState::new::<State>(&display_handle);
         event_loop
             .insert_source(
@@ -1649,8 +1641,6 @@ impl Niri {
             )
             .unwrap();
 
-        let mutter_x11_interop_state =
-            MutterX11InteropManagerState::new::<State, _>(&display_handle, move |_| true);
         let mut seat: Seat<State> = seat_state.new_wl_seat(&display_handle, backend.seat_name());
         let keyboard = match seat.add_keyboard(
             config_.input.keyboard.xkb.to_xkb_config(),
@@ -1808,9 +1798,7 @@ impl Niri {
             bind_repeat_timer: Option::default(),
             presentation_state,
             security_context_state,
-            gamma_control_manager_state,
             activation_state,
-            mutter_x11_interop_state,
             seat,
             keyboard_focus: KeyboardFocus::Layout { surface: None },
             layer_shell_on_demand_focus: None,
@@ -2063,7 +2051,6 @@ impl Niri {
         self.layout.remove_output(output);
         self.global_space.unmap_output(output);
         self.reposition_outputs(None);
-        self.gamma_control_manager_state.output_removed(output);
 
         let state = self.output_state.remove(output).unwrap();
 
