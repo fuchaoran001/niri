@@ -3780,10 +3780,6 @@ fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>)
             | InputEvent::PointerButton { .. }
             | InputEvent::PointerMotion { .. }
             | InputEvent::PointerMotionAbsolute { .. }
-            | InputEvent::TabletToolAxis { .. }
-            | InputEvent::TabletToolButton { .. }
-            | InputEvent::TabletToolProximity { .. }
-            | InputEvent::TabletToolTip { .. }
     )
 }
 
@@ -4017,41 +4013,6 @@ pub fn apply_libinput_settings(config: &niri_config::Input, device: &mut input::
         }
     }
 
-    let is_tablet = device.has_capability(input::DeviceCapability::TabletTool);
-    if is_tablet {
-        let c = &config.tablet;
-        let _ = device.config_send_events_set_mode(if c.off {
-            input::SendEventsMode::DISABLED
-        } else {
-            input::SendEventsMode::ENABLED
-        });
-
-        #[rustfmt::skip]
-        const IDENTITY_MATRIX: [f32; 6] = [
-            1., 0., 0.,
-            0., 1., 0.,
-        ];
-
-        let _ = device.config_calibration_set_matrix(
-            c.calibration_matrix
-                .as_deref()
-                .and_then(|m| m.try_into().ok())
-                .or(device.config_calibration_default_matrix())
-                .unwrap_or(IDENTITY_MATRIX),
-        );
-
-        let _ = device.config_left_handed_set(c.left_handed);
-    }
-
-    let is_touch = device.has_capability(input::DeviceCapability::Touch);
-    if is_touch {
-        let c = &config.touch;
-        let _ = device.config_send_events_set_mode(if c.off {
-            input::SendEventsMode::DISABLED
-        } else {
-            input::SendEventsMode::ENABLED
-        });
-    }
 }
 
 pub fn mods_with_binds(mod_key: ModKey, binds: &Binds, triggers: &[Trigger]) -> HashSet<Modifiers> {
