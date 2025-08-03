@@ -1,4 +1,4 @@
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::unix::net::UnixStream;
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use std::{env, mem};  
 
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
-use anyhow::{bail, ensure, Context};
+use anyhow::{Context};
 use calloop::futures::Scheduler;
 use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, PreviewRender, TrackLayout,
@@ -31,8 +31,6 @@ use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Element, Id, Kind, PrimaryScanoutOutput,
     RenderElementStates,
 };
-use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::Color32F;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
@@ -50,7 +48,7 @@ use smithay::input::pointer::{
      MotionEvent,
 };
 use smithay::input::{Seat, SeatState};
-use smithay::output::{self, Output, OutputModeSource, PhysicalProperties, Subpixel};
+use smithay::output::{self, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
@@ -58,7 +56,6 @@ use smithay::reexports::calloop::{
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
 use smithay::reexports::wayland_protocols_misc::server_decoration as _server_decoration;
-use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -66,7 +63,7 @@ use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle, Resource};
 use smithay::utils::{
-    ClockSource, IsAlive as _, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size,
+    ClockSource, IsAlive as _, Logical, Monotonic, Point, Rectangle, Scale, Size,
     Transform, SERIAL_COUNTER,
 };
 use smithay::wayland::compositor::{
@@ -130,13 +127,11 @@ use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::gamma_control::GammaControlManagerState;
 use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
-use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
 use crate::render_helpers::debug::draw_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::{
- render_to_dmabuf, render_to_shm,
     shaders, RenderTarget, SplitElements,
 };
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
@@ -234,7 +229,6 @@ pub struct Niri {
     pub kde_decoration_state: KdeDecorationState,
     pub layer_shell_state: WlrLayerShellState,
     pub foreign_toplevel_state: ForeignToplevelManagerState,
-    pub screencopy_state: ScreencopyManagerState,
     pub output_management_state: OutputManagementManagerState,
     pub viewporter_state: ViewporterState,
     pub xdg_foreign_state: XdgForeignState,
@@ -1668,8 +1662,6 @@ impl Niri {
         let mut output_management_state =
             OutputManagementManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         output_management_state.on_config_changed(config_.outputs.clone());
-        let screencopy_state =
-            ScreencopyManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let viewporter_state = ViewporterState::new::<State>(&display_handle);
         let xdg_foreign_state = XdgForeignState::new::<State>(&display_handle);
 
@@ -1826,7 +1818,6 @@ impl Niri {
             layer_shell_state,
             foreign_toplevel_state,
             output_management_state,
-            screencopy_state,
             viewporter_state,
             xdg_foreign_state,
             text_input_state,
@@ -2131,8 +2122,6 @@ impl Niri {
             RedrawState::WaitingForEstimatedVBlank(token) => self.event_loop.remove(token),
             RedrawState::WaitingForEstimatedVBlankAndQueued(token) => self.event_loop.remove(token),
         }
-
-        self.remove_screencopy_output(output);
 
         // Disable the output global and remove some time later to give the clients some time to
         // process it.
@@ -3347,10 +3336,6 @@ impl Niri {
         // However, this should probably be restricted to sending frame callbacks to more surfaces,
         // to err on the safe side.
         self.send_frame_callbacks(output);
-        backend.with_primary_renderer(|renderer| {
-
-            self.render_for_screencopy_with_damage(renderer, output);
-        });
     }
 
     pub fn refresh_on_demand_vrr(&mut self, backend: &mut Backend, output: &Output) {
@@ -3763,185 +3748,6 @@ impl Niri {
         }
 
         feedback
-    }
-
-    pub fn render_for_screencopy_with_damage(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        output: &Output,
-    ) {
-        let _span = tracy_client::span!("Niri::render_for_screencopy_with_damage");
-
-        let mut screencopy_state = mem::take(&mut self.screencopy_state);
-        let elements = OnceCell::new();
-
-        for queue in screencopy_state.queues_mut() {
-            let (damage_tracker, screencopy) = queue.split();
-            if let Some(screencopy) = screencopy {
-                if screencopy.output() == output {
-                    let elements = elements.get_or_init(|| {
-                        self.render(renderer, output, true, RenderTarget::ScreenCapture)
-                    });
-                    // FIXME: skip elements if not including pointers
-                    let render_result = Self::render_for_screencopy_internal(
-                        renderer,
-                        output,
-                        elements,
-                        true,
-                        damage_tracker,
-                        screencopy,
-                    );
-                    match render_result {
-                        Ok((sync, damages)) => {
-                            if let Some(damages) = damages {
-                                // Convert from Physical coordinates back to Buffer coordinates.
-                                let transform = output.current_transform();
-                                let physical_size =
-                                    transform.transform_size(screencopy.buffer_size());
-                                let damages = damages.iter().map(|dmg| {
-                                    dmg.to_logical(1).to_buffer(
-                                        1,
-                                        transform.invert(),
-                                        &physical_size.to_logical(1),
-                                    )
-                                });
-
-                                screencopy.damage(damages);
-                                queue.pop().submit_after_sync(false, sync, &self.event_loop);
-                            } else {
-                                trace!("no damage found, waiting till next redraw");
-                            }
-                        }
-                        Err(err) => {
-                            // Recreate damage tracker to report full damage next check.
-                            *damage_tracker =
-                                OutputDamageTracker::new((0, 0), 1.0, Transform::Normal);
-                            queue.pop();
-                            warn!("error rendering for screencopy: {err:?}");
-                        }
-                    }
-                };
-            }
-        }
-
-        self.screencopy_state = screencopy_state;
-    }
-
-    pub fn render_for_screencopy_without_damage(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        manager: &ZwlrScreencopyManagerV1,
-        screencopy: Screencopy,
-    ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::render_for_screencopy");
-
-        let output = screencopy.output();
-        ensure!(
-            self.output_state.contains_key(output),
-            "screencopy output missing"
-        );
-
-        self.update_render_elements(Some(output));
-
-        let elements = self.render(
-            renderer,
-            output,
-            screencopy.overlay_cursor(),
-            RenderTarget::ScreenCapture,
-        );
-        let Some(queue) = self.screencopy_state.get_queue_mut(manager) else {
-            bail!("screencopy manager destroyed already");
-        };
-        let damage_tracker = queue.split().0;
-
-        let render_result = Self::render_for_screencopy_internal(
-            renderer,
-            output,
-            &elements,
-            false,
-            damage_tracker,
-            &screencopy,
-        );
-
-        let res = render_result
-            .map(|(sync, _damage)| screencopy.submit_after_sync(false, sync, &self.event_loop));
-
-        if res.is_err() {
-            // Recreate damage tracker to report full damage next check.
-            *damage_tracker = OutputDamageTracker::new((0, 0), 1.0, Transform::Normal);
-        }
-
-        res
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn render_for_screencopy_internal<'a>(
-        renderer: &mut GlesRenderer,
-        output: &Output,
-        elements: &[OutputRenderElements<GlesRenderer>],
-        with_damage: bool,
-        damage_tracker: &'a mut OutputDamageTracker,
-        screencopy: &Screencopy,
-    ) -> anyhow::Result<(Option<SyncPoint>, Option<&'a Vec<Rectangle<i32, Physical>>>)> {
-        let OutputModeSource::Static {
-            size: last_size,
-            scale: last_scale,
-            transform: last_transform,
-        } = damage_tracker.mode().clone()
-        else {
-            unreachable!("damage tracker must have static mode");
-        };
-
-        let size = screencopy.buffer_size();
-        let scale: Scale<f64> = output.current_scale().fractional_scale().into();
-        let transform = output.current_transform();
-
-        if size != last_size || scale != last_scale || transform != last_transform {
-            *damage_tracker = OutputDamageTracker::new(size, scale, transform);
-        }
-
-        let region_loc = screencopy.region_loc();
-        let elements = elements
-            .iter()
-            .map(|element| {
-                RelocateRenderElement::from_element(
-                    element,
-                    region_loc.upscale(-1),
-                    Relocate::Relative,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        // Just checked damage tracker has static mode
-        let damages = damage_tracker.damage_output(1, &elements).unwrap().0;
-        if with_damage && damages.is_none() {
-            return Ok((None, None));
-        }
-
-        let elements = elements.iter().rev();
-
-        let sync = match screencopy.buffer() {
-            ScreencopyBuffer::Dmabuf(dmabuf) => {
-                let sync =
-                    render_to_dmabuf(renderer, dmabuf.clone(), size, scale, transform, elements)
-                        .context("error rendering to screencopy dmabuf")?;
-                Some(sync)
-            }
-            ScreencopyBuffer::Shm(wl_buffer) => {
-                render_to_shm(renderer, wl_buffer, size, scale, transform, elements)
-                    .context("error rendering to screencopy shm buffer")?;
-                None
-            }
-        };
-
-        Ok((sync, damages))
-    }
-
-    pub fn remove_screencopy_output(&mut self, output: &Output) {
-        let _span = tracy_client::span!("Niri::remove_screencopy_output");
-        for queue in self.screencopy_state.queues_mut() {
-            queue.remove_output(output);
-        }
     }
 
     pub fn debug_toggle_damage(&mut self) {
