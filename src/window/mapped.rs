@@ -24,7 +24,6 @@ use wayland_backend::server::Credentials;  // 进程凭证
 
 // 本地模块
 use super::{ResolvedWindowRules, WindowRef};  // 窗口规则和引用
-use crate::handlers::KdeDecorationsModeState;  // KDE装饰模式
 use crate::layout::{  // 布局相关
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
     LayoutElementRenderSnapshot,
@@ -874,19 +873,11 @@ impl LayoutElement for Mapped {
     }
 
     fn has_ssd(&self) -> bool {
-        let toplevel = self.toplevel();
+        let _toplevel = self.toplevel();
         let mode = with_toplevel_role(self.toplevel(), |role| role.current.decoration_mode);
 
         match mode {
             Some(zxdg_toplevel_decoration_v1::Mode::ServerSide) => true,
-            // Check KDE decorations when XDG are not in use.
-            None => with_states(toplevel.wl_surface(), |states| {
-                states
-                    .data_map
-                    .get::<KdeDecorationsModeState>()
-                    .map(KdeDecorationsModeState::is_server)
-                    == Some(true)
-            }),
             _ => false,
         }
     }

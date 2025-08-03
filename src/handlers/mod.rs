@@ -78,7 +78,6 @@ use smithay::{
     delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_activation,
 };
 
-pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
 use crate::layout::ActivateWindow;
 use crate::niri::{DndIcon, NewClient, State};
 use crate::protocols::foreign_toplevel::{

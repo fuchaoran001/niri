@@ -1,23 +1,38 @@
+// 内部可变性容器（线程不安全）
 use std::cell::{Cell, RefCell};
+// 集合类型（哈希映射和哈希集合）
 use std::collections::{HashMap, HashSet};
+// 操作系统兼容的字符串类型
 use std::ffi::OsString;
+// Unix域套接字
 use std::os::unix::net::UnixStream;
+// 路径处理
 use std::path::PathBuf;
+// 引用计数智能指针
 use std::rc::Rc;
+// 原子布尔类型
 use std::sync::atomic::{AtomicBool, Ordering};
+// 多生产者单消费者通道
 use std::sync::mpsc::{self, Receiver, Sender};
+// 线程同步原语（互斥锁和原子引用计数）
 use std::sync::{Arc, Mutex};
+// 时间处理
 use std::time::{Duration, Instant};
+// 环境变量和内存操作
 use std::{env, mem};  
 
-use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
+// 错误处理上下文
 use anyhow::{Context};
+// 异步任务调度器
 use calloop::futures::Scheduler;
+// 配置相关结构体
 use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, PreviewRender, TrackLayout,
     WarpMouseToFocusMode, WorkspaceReference,
 };
+// 输入键码
 use smithay::backend::input::Keycode;
+// 渲染器相关组件
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::surface::{
@@ -31,77 +46,108 @@ use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Element, Id, Kind, PrimaryScanoutOutput,
     RenderElementStates,
 };
+// 颜色类型
 use smithay::backend::renderer::Color32F;
+// 桌面工具函数
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, take_presentation_feedback_surface_tree,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
+// 桌面组件（图层、窗口等）
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, LayerMap, LayerSurface, PopupGrab, PopupManager,
     PopupUngrabStrategy, Space, Window, WindowSurfaceType,
 };
+// 键盘布局
 use smithay::input::keyboard::Layout as KeyboardLayout;
+// 指针事件
 use smithay::input::pointer::{
  CursorImageStatus, CursorImageSurfaceData,
      MotionEvent,
 };
+// 输入设备管理
 use smithay::input::{Seat, SeatState};
+// 输出管理
 use smithay::output::{self, Output, PhysicalProperties, Subpixel};
+// 事件循环组件
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
     Interest, LoopHandle, LoopSignal, Mode, PostAction, RegistrationToken,
 };
+// Wayland协议扩展
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
-use smithay::reexports::wayland_protocols_misc::server_decoration as _server_decoration;
+// Wayland服务器底层
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle, Resource};
+// 实用工具
 use smithay::utils::{
     ClockSource, IsAlive as _, Logical, Monotonic, Point, Rectangle, Scale, Size,
     Transform, SERIAL_COUNTER,
 };
+// Wayland合成器
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorHandler,
     CompositorState, HookId, SurfaceData, TraversalAction,
 };
+// 光标形状管理
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
+// DMA-BUF支持
 use smithay::wayland::dmabuf::DmabufState;
+// 分数缩放
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+// 空闲抑制
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
+// 空闲通知
 use smithay::wayland::idle_notify::IdleNotifierState;
+// 输入法管理
 use smithay::wayland::input_method::{InputMethodManagerState, InputMethodSeat};
+// 键盘快捷键抑制
 use smithay::wayland::keyboard_shortcuts_inhibit::{
     KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
 };
+// 输出管理
 use smithay::wayland::output::OutputManagerState;
+// 指针约束
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraintsState};
+// 呈现管理
 use smithay::wayland::presentation::PresentationState;
+// 相对指针
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
+// 安全上下文
 use smithay::wayland::security_context::SecurityContextState;
+// 数据设备（剪贴板等）
 use smithay::wayland::selection::data_device::{ DataDeviceState};
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
-use smithay::wayland::shell::kde::decoration::KdeDecorationState;
+// 层shell协议
 use smithay::wayland::shell::wlr_layer::{self, Layer, WlrLayerShellState};
+// XDG装饰
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
+// XDG Shell
 use smithay::wayland::shell::xdg::XdgShellState;
+// 共享内存
 use smithay::wayland::shm::ShmState;
+// 单像素缓冲区（测试用）
 #[cfg(test)]
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+// Wayland套接字监听
 use smithay::wayland::socket::ListeningSocketSource;
+// 文本输入
 use smithay::wayland::text_input::TextInputManagerState;
+// 视口管理
 use smithay::wayland::viewporter::ViewporterState;
-use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
+// XDG激活协议
 use smithay::wayland::xdg_activation::XdgActivationState;
 
-
+// 内部模块
 use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
@@ -137,185 +183,236 @@ use crate::utils::{
 
 };
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};  
-
-// We'll try to send frame callbacks at least once a second. We'll make a timer that fires once a
-// second, so with the worst timing the maximum interval between two frame callbacks for a surface
-// should be ~1.995 seconds.
+// 我们将尝试每秒至少发送一次帧回调。我们将创建一个每秒触发一次的计时器，因此，在最差的情况下，同一表面两次帧回调之间的最大间隔
+// 应该约为 1.995 秒。
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));  
 
 pub struct Niri {
-    pub config: Rc<RefCell<Config>>,  
-
-    /// Output config from the config file.
+    /// 动态配置
+    pub config: Rc<RefCell<Config>>,  // 动态配置
+    
+    /// 来自配置文件的输出配置
     ///
-    /// This does not include transient output config changes done via IPC. It is only used when
-    /// reloading the config from disk to determine if the output configuration should be reloaded
-    /// (and transient changes dropped).
-    pub config_file_output_config: niri_config::Outputs,  
+    /// 这不包括通过 IPC 完成的瞬时输出配置更改。它仅在
+    /// 从磁盘重新加载配置时使用，以确定是否应重新加载输出配置
+    /// （以及是否删除瞬时更改）。
+    pub config_file_output_config: niri_config::Outputs,   // 配置文件中的输出配置
 
+    /// 事件循环句柄，用于管理事件源和回调
     pub event_loop: LoopHandle<'static, State>,
+    /// 异步任务调度器，用于调度未来执行的任务
     pub scheduler: Scheduler<()>,
+    /// 停止信号，用于通知事件循环停止运行
     pub stop_signal: LoopSignal,
+    /// Wayland 显示句柄，用于管理客户端连接和全局对象
     pub display_handle: DisplayHandle,  
 
-    /// Name of the Wayland socket.
+    /// Wayland 套接字的名称（如果创建了套接字）
     ///
-    /// This is `None` when creating `Niri` without a Wayland socket.
+    /// 如果创建 "Niri" 时没有 Wayland 套接字，则此值为 `None`
     pub socket_name: Option<OsString>,  
 
+    /// 程序启动时间点，用于动画和计时
     pub start_time: Instant,  
 
-    /// Whether the at-startup=true window rules are active.
+    /// 标记是否处于启动阶段（前60秒）
     pub is_at_startup: bool,  
 
-    /// Clock for driving animations.
-    pub clock: Clock,  
+    /// 驱动动画的时钟，控制动画速度和状态
+    pub clock: Clock,   /// 驾驶动画的时钟。
 
-    // Each workspace corresponds to a Space. Each workspace generally has one Output mapped to it,
-    // however it may have none (when there are no outputs connected) or multiple (when mirroring).
+    /// 每个工作区对应一个空间。每个工作区通常映射一个输出，
+    /// 但也可能没有输出（当没有连接输出时）或有多个输出（当镜像时）
     pub layout: Layout<Mapped>,  
 
-    // This space does not actually contain any windows, but all outputs are mapped into it
-    // according to their global position.
+    /// 全局空间，所有输出都根据其全局位置映射到其中
+    ///
+    /// 此空间实际上不包含任何窗口，但用于管理输出的全局位置
     pub global_space: Space<Window>,  
 
-    /// Mapped outputs, sorted by their name and position.
+    /// 已映射的输出，按其名称和位置排序
     pub sorted_outputs: Vec<Output>,  
 
-    // Windows which don't have a buffer attached yet.
+    /// 尚未连接缓冲区的窗口（未映射窗口）
     pub unmapped_windows: HashMap<WlSurface, Unmapped>,  
 
-    /// Layer surfaces which don't have a buffer attached yet.
+    /// 尚未附加缓冲区的层表面（未映射层表面）
     pub unmapped_layer_surfaces: HashSet<WlSurface>,  
 
-    /// Extra data for mapped layer surfaces.
+    /// 已映射层表面的额外数据
     pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,  
 
-    // Cached root surface for every surface, so that we can access it in destroyed() where the
-    // normal get_parent() is cleared out.
+    /// 为每个表面缓存根表面
+    ///
+    /// 用于在 destroyed() 中访问根表面，因为正常的 get_parent() 会被清除
     pub root_surface: HashMap<WlSurface, WlSurface>,  
 
-    // Dmabuf readiness pre-commit hook for a surface.
+    /// 为表面准备的 Dmabuf 预提交钩子
     pub dmabuf_pre_commit_hook: HashMap<WlSurface, HookId>,  
 
-    /// Clients to notify about their blockers being cleared.
+    /// 通知客户端他们的阻塞器已被清除的发送通道
     pub blocker_cleared_tx: Sender<Client>,
+    /// 通知客户端他们的阻塞器已被清除的接收通道
     pub blocker_cleared_rx: Receiver<Client>,  
 
+    /// 每个输出的状态管理
     pub output_state: HashMap<Output, OutputState>,  
 
-    // When false, we're idling with monitors powered off.
+    /// 标记显示器是否处于活动状态
+    ///
+    /// 当该值为假时，我们将处于空闲状态并且显示器已关闭
     pub monitors_active: bool,  
 
-    /// Whether the laptop lid is closed.
+    /// 笔记本电脑盖子是否关闭
     ///
-    /// Libinput guarantees that the lid switch starts in open state, and if it was closed during
-    /// startup, libinput will immediately send a closed event.
+    /// Libinput 保证盖子开关启动时处于打开状态，如果在启动过程中盖子开关处于关闭状态，则 libinput 将立即发送一个关闭事件
     pub is_lid_closed: bool,  
 
+    /// 已连接的输入设备集合
     pub devices: HashSet<input::Device>, 
 
-    // Smithay state.
+    // Smithay 状态管理（以下是一组 Smithay 相关的状态对象）
+    /// 管理 Wayland 合成器协议的状态（创建/管理表面）
     pub compositor_state: CompositorState,
+    /// 管理 XDG Shell 协议的状态（窗口管理）
     pub xdg_shell_state: XdgShellState,
+    /// 管理 XDG 装饰协议的状态（客户端/服务端装饰）
     pub xdg_decoration_state: XdgDecorationState,
-    pub kde_decoration_state: KdeDecorationState,
+    /// 管理 Layer Shell 协议的状态（特殊层表面如面板/通知）
     pub layer_shell_state: WlrLayerShellState,
+    /// 管理外部顶层窗口协议的状态（窗口列表/任务栏集成）
     pub foreign_toplevel_state: ForeignToplevelManagerState,
+    /// 管理输出管理协议的状态（动态配置显示器）
     pub output_management_state: OutputManagementManagerState,
+    /// 管理视口协议的状态（表面缩放和裁剪）
     pub viewporter_state: ViewporterState,
+    /// 管理共享内存协议的状态（SHM 缓冲区支持）
     pub shm_state: ShmState,
+    /// 管理输出全局对象的状态（显示器枚举）
     pub output_manager_state: OutputManagerState,
+    /// 管理 DMA-BUF 协议的状态（直接内存访问缓冲区）
     pub dmabuf_state: DmabufState,
+    /// 管理分数缩放协议的状态（非整数缩放支持）
     pub fractional_scale_manager_state: FractionalScaleManagerState,
+    /// 管理输入座位资源的状态（创建/管理输入设备）
     pub seat_state: SeatState<State>,
+    /// 管理文本输入协议的状态（输入法框架）
     pub text_input_state: TextInputManagerState,
+    /// 管理输入法协议的状态（高级输入法支持）
     pub input_method_state: InputMethodManagerState,
+    /// 管理键盘快捷键抑制协议的状态（全屏应用快捷键处理）
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
-    pub virtual_keyboard_state: VirtualKeyboardManagerState,
+    /// 管理相对指针协议的状态（精确指针运动事件）
     pub relative_pointer_state: RelativePointerManagerState,
+    /// 管理指针约束协议的状态（限制指针移动范围）
     pub pointer_constraints_state: PointerConstraintsState,
+    /// 管理空闲通知协议的状态（用户活动检测）
     pub idle_notifier_state: IdleNotifierState<State>,
+    /// 管理空闲抑制协议的状态（防止系统休眠）
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
+    /// 管理数据设备协议的状态（剪贴板/拖放）
     pub data_device_state: DataDeviceState,
+    /// 管理主选择协议的状态（Linux 主选择剪贴板）
     pub primary_selection_state: PrimarySelectionState,
+    /// 管理 WLR 数据控制协议的状态（剪贴板管理器扩展）
     pub wlr_data_control_state: WlrDataControlState,
+    /// 管理扩展数据控制协议的状态（额外剪贴板功能）
     pub ext_data_control_state: ExtDataControlState,
+
+
+    /// 弹出窗口管理器
     pub popups: PopupManager,
+    /// 当前的弹出窗口抓取状态
     pub popup_grab: Option<PopupGrabState>,
+    /// 呈现状态管理
     pub presentation_state: PresentationState,
+    /// 安全上下文状态
     pub security_context_state: SecurityContextState,
+    /// XDG 激活状态
     pub activation_state: XdgActivationState,  
+    /// 输入座位（包含键盘、指针等）
     pub seat: Seat<State>,
-    /// Scancodes of the keys to suppress.
+    /// 要抑制的键的扫描码集合
     pub suppressed_keys: HashSet<Keycode>,
-    /// Button codes of the mouse buttons to suppress.
+    /// 要抑制的鼠标按钮的按钮代码集合
     pub suppressed_buttons: HashSet<u32>,
+    /// 按键绑定冷却计时器
     pub bind_cooldown_timers: HashMap<Key, RegistrationToken>,
+    /// 按键重复计时器
     pub bind_repeat_timer: Option<RegistrationToken>,
+    /// 当前的键盘焦点
     pub keyboard_focus: KeyboardFocus,
+    /// 按需聚焦的层表面
     pub layer_shell_on_demand_focus: Option<LayerSurface>,
+    /// 先前聚焦的窗口（用于恢复焦点）
     pub previously_focused_window: Option<Window>,
+    /// 空闲抑制的表面集合
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
+    /// 标记是否被 FDO 空闲抑制
     pub is_fdo_idle_inhibited: Arc<AtomicBool>,
+    /// 键盘快捷键抑制的表面映射
     pub keyboard_shortcuts_inhibiting_surfaces: HashMap<WlSurface, KeyboardShortcutsInhibitor>,  
 
+    /// 光标管理器
     pub cursor_manager: CursorManager,
+    /// 光标纹理缓存
     pub cursor_texture_cache: CursorTextureCache,
+    /// 光标形状管理器状态
     pub cursor_shape_manager_state: CursorShapeManagerState,
+    /// 拖放操作中的图标
     pub dnd_icon: Option<DndIcon>,
-    /// Contents under pointer.
+    /// 指针下的内容（定期更新）
     ///
-    /// Periodically updated: on motion and other events and in the loop callback. If you require
-    /// the real up-to-date contents somewhere, it's better to recompute on the spot.
-    ///
-    /// This is not pointer focus. I.e. during a click grab, the pointer focus remains on the
-    /// client with the grab, but this field will keep updating to the latest contents as if no
-    /// grab was active.
-    ///
-    /// This is primarily useful for emitting pointer motion events for surfaces that move
-    /// underneath the cursor on their own (i.e. when the tiling layout moves). In this case, not
-    /// taking grabs into account is expected, because we pass the information to pointer.motion()
-    /// which passes it down through grabs, which decide what to do with it as they see fit.
+    /// 这不是指针焦点。例如，在点击抓取期间，指针焦点仍然在
+    /// 进行抓取的客户端上，但此字段将继续更新为最新内容，就像没有
+    /// 抓取处于活动状态一样
     pub pointer_contents: PointContents,
+    /// 指针可见性状态
     pub pointer_visibility: PointerVisibility,
+    /// 指针不活动计时器
     pub pointer_inactivity_timer: Option<RegistrationToken>,
-    /// Whether the pointer inactivity timer got reset this event loop iteration.
+    /// 指针不活动计时器是否在本次事件循环迭代中重置
     ///
-    /// Used for limiting the reset to once per iteration, so that it's not spammed with high
-    /// resolution mice.
+    /// 用于将重置限制为每次迭代一次，以免受到高分辨率鼠标的干扰
     pub pointer_inactivity_timer_got_reset: bool,
-    /// Whether the (idle notifier) activity was notified this event loop iteration.
+    /// （空闲通知器）活动是否在本次事件循环迭代中收到通知
     ///
-    /// Used for limiting the notify to once per iteration, so that it's not spammed with high
-    /// resolution mice.
+    /// 用于将通知限制为每次迭代一次，以免被高分辨率鼠标所淹没
     pub notified_activity_this_iteration: bool,
+    /// 标记指针是否在热角区域内
     pub pointer_inside_hot_corner: bool,
+    /// 垂直滚轮跟踪器
     pub vertical_wheel_tracker: ScrollTracker,
+    /// 水平滚轮跟踪器
     pub horizontal_wheel_tracker: ScrollTracker,
+    /// 包含鼠标绑定的修饰键集合
     pub mods_with_mouse_binds: HashSet<Modifiers>,
+    /// 包含滚轮绑定的修饰键集合
     pub mods_with_wheel_binds: HashSet<Modifiers>,
+    /// 调试标记：是否绘制不透明区域
     pub debug_draw_opaque_regions: bool,
+    /// 调试标记：是否绘制损坏区域
     pub debug_draw_damage: bool,  
 
+    /// IPC 服务器实例
     pub ipc_server: Option<IpcServer>,
+    /// 标记输出状态是否发生变化（需要 IPC 更新）
     pub ipc_outputs_changed: bool,  
-
 }  
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerVisibility {
     /// The pointer is visible.
     Visible,
-    /// The pointer is invisible, but retains its focus.
+    /// 指针不可见，但仍保留其焦点。
     ///
-    /// This state is set temporarily after auto-hiding the pointer to keep tooltips open and grabs
-    /// ongoing.
+    /// 自动隐藏指针后，会暂时设置此状态，以保持工具提示打开并持续抓取。
+    /// 持续进行。
     Hidden,
-    /// The pointer is invisible and cannot focus.
+    /// 指针不可见且无法获得焦点。
     ///
-    /// Corresponds to a fully disabled pointer, for example after a touchscreen input, or after
-    /// the pointer contents changed in a Hidden state.
+    /// 对应于完全禁用的指针，例如在触摸屏输入之后，或在
+    /// 指针内容在隐藏状态下发生变化之后。
     Disabled,
 }  
 
@@ -1555,17 +1652,6 @@ impl Niri {
                     .unwrap()
                     .can_view_decoration_globals
             });
-        let kde_decoration_state = KdeDecorationState::new_with_filter::<State, _>(
-            &display_handle,
-            // If we want CSD we will hide the global.
-            KdeDecorationsMode::Server,
-            |client| {
-                client
-                    .get_data::<ClientState>()
-                    .unwrap()
-                    .can_view_decoration_globals
-            },
-        );
         let layer_shell_state = WlrLayerShellState::new_with_filter::<State, _>(
             &display_handle,
             client_is_unrestricted,
@@ -1612,8 +1698,6 @@ impl Niri {
             InputMethodManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let keyboard_shortcuts_inhibit_state =
             KeyboardShortcutsInhibitState::new::<State>(&display_handle);
-        let virtual_keyboard_state =
-            VirtualKeyboardManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let foreign_toplevel_state =
             ForeignToplevelManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let mut output_management_state =
@@ -1761,7 +1845,6 @@ impl Niri {
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,
-            kde_decoration_state,
             layer_shell_state,
             foreign_toplevel_state,
             output_management_state,
@@ -1769,7 +1852,6 @@ impl Niri {
             text_input_state,
             input_method_state,
             keyboard_shortcuts_inhibit_state,
-            virtual_keyboard_state,
             shm_state,
             output_manager_state,
             dmabuf_state,

@@ -39,7 +39,6 @@ use smithay::wayland::shell::xdg::{
 };
 use wayland_backend::server::Credentials; // Wayland凭证
 
-use crate::handlers::KdeDecorationsModeState; // KDE装饰状态
 use crate::niri::ClientState; // 客户端状态
 
 // 子模块声明
@@ -352,13 +351,6 @@ pub fn update_tiled_state(
         if let Some(mode) = toplevel.with_pending_state(|state| state.decoration_mode) {
             // 若为服务端装饰则平铺
             mode == zxdg_toplevel_decoration_v1::Mode::ServerSide
-        } 
-        // 检查KDE装饰状态
-        else if let Some(mode) = with_states(toplevel.wl_surface(), |states| {
-            states.data_map.get::<KdeDecorationsModeState>().cloned()
-        }) {
-            // KDE服务端装饰或按配置偏好
-            mode.is_server() || prefer_no_csd
         } 
         // 默认使用配置偏好
         else {

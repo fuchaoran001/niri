@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use calloop::Interest;
 use niri_config::PresetSize;
 use smithay::desktop::{
@@ -12,11 +10,10 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::ConstraintAdjustment;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{self};
-use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration;
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{self, Resource, WEnum};
+use smithay::reexports::wayland_server::{Resource};
 use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorHandler as _,
@@ -25,7 +22,6 @@ use smithay::wayland::compositor::{
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::selection::data_device::DnDGrab;
-use smithay::wayland::shell::kde::decoration::{KdeDecorationHandler, KdeDecorationState};
 use smithay::wayland::shell::wlr_layer::{self, Layer};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
@@ -33,7 +29,7 @@ use smithay::wayland::shell::xdg::{
     XdgToplevelSurfaceData,
 };
 use smithay::{
-    delegate_kde_decoration, delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_xdg_decoration, delegate_xdg_shell,
 };
 use tracing::field::Empty;
 
@@ -773,46 +769,7 @@ impl XdgDecorationHandler for State {
 }
 delegate_xdg_decoration!(State);
 
-/// Whether KDE server decorations are in use.
-#[derive(Default, Clone)]
-pub struct KdeDecorationsModeState {
-    server: Cell<bool>,
-}
 
-impl KdeDecorationsModeState {
-    pub fn is_server(&self) -> bool {
-        self.server.get()
-    }
-}
-
-impl KdeDecorationHandler for State {
-    fn kde_decoration_state(&self) -> &KdeDecorationState {
-        &self.niri.kde_decoration_state
-    }
-
-    fn request_mode(
-        &mut self,
-        surface: &WlSurface,
-        decoration: &org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration,
-        mode: wayland_server::WEnum<org_kde_kwin_server_decoration::Mode>,
-    ) {
-        let WEnum::Value(mode) = mode else {
-            return;
-        };
-
-        decoration.mode(mode);
-
-        with_states(surface, |states| {
-            let state = states
-                .data_map
-                .get_or_insert(KdeDecorationsModeState::default);
-            state
-                .server
-                .set(mode == org_kde_kwin_server_decoration::Mode::Server);
-        });
-    }
-}
-delegate_kde_decoration!(State);
 
 impl State {
     pub fn send_initial_configure(&mut self, toplevel: &ToplevelSurface) {
