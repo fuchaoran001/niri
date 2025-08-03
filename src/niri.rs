@@ -109,7 +109,6 @@ use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT};
-use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
 use crate::input::{
     apply_libinput_settings, mods_with_mouse_binds,
@@ -298,8 +297,6 @@ pub struct Niri {
     /// resolution mice.
     pub notified_activity_this_iteration: bool,
     pub pointer_inside_hot_corner: bool,
-    pub gesture_swipe_3f_cumulative: Option<(f64, f64)>,
-    pub overview_scroll_swipe_gesture: ScrollSwipeGesture,
     pub vertical_wheel_tracker: ScrollTracker,
     pub horizontal_wheel_tracker: ScrollTracker,
     pub mods_with_mouse_binds: HashSet<Modifiers>,
@@ -1831,8 +1828,6 @@ impl Niri {
             pointer_inactivity_timer_got_reset: false,
             notified_activity_this_iteration: false,
             pointer_inside_hot_corner: false,
-            gesture_swipe_3f_cumulative: None,
-            overview_scroll_swipe_gesture: ScrollSwipeGesture::new(),
             vertical_wheel_tracker: ScrollTracker::new(120),
             horizontal_wheel_tracker: ScrollTracker::new(120),
             mods_with_mouse_binds,
