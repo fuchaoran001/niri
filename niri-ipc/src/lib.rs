@@ -643,8 +643,6 @@ pub enum Action {
         #[cfg_attr(feature = "clap", arg())]
         layout: LayoutSwitchTarget,
     },
-    /// Show the hotkey overlay.
-    ShowHotkeyOverlay {},
     /// Move the focused workspace to the monitor to the left.
     MoveWorkspaceToMonitorLeft {},
     /// Move the focused workspace to the monitor to the right.

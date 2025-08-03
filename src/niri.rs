@@ -139,7 +139,6 @@ use crate::render_helpers::{
  render_to_dmabuf, render_to_shm,
     shaders, RenderTarget, SplitElements,
 };
-use crate::ui::hotkey_overlay::HotkeyOverlay;
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::CHILD_ENV;
 use crate::utils::{
@@ -320,8 +319,6 @@ pub struct Niri {
     pub vertical_finger_scroll_tracker: ScrollTracker,
     pub horizontal_finger_scroll_tracker: ScrollTracker,
     pub mods_with_finger_scroll_binds: HashSet<Modifiers>,  
-
-    pub hotkey_overlay: HotkeyOverlay,
 
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,  
@@ -1251,17 +1248,6 @@ impl State {
             preserved_output_config = Some(mem::take(&mut old_config.outputs));
         }
 
-        let new_mod_key = self.backend.mod_key(&config);
-        if new_mod_key != self.backend.mod_key(&old_config) || config.binds != old_config.binds {
-            self.niri
-                .hotkey_overlay
-                .on_hotkey_config_updated(new_mod_key);
-            self.niri.mods_with_mouse_binds = mods_with_mouse_binds(new_mod_key, &config.binds);
-            self.niri.mods_with_wheel_binds = mods_with_wheel_binds(new_mod_key, &config.binds);
-            self.niri.mods_with_finger_scroll_binds =
-                mods_with_finger_scroll_binds(new_mod_key, &config.binds);
-        }
-
         if config.window_rules != old_config.window_rules {
             window_rules_changed = true;
         }
@@ -1744,11 +1730,6 @@ impl Niri {
         let mods_with_wheel_binds = mods_with_wheel_binds(mod_key, &config_.binds);
         let mods_with_finger_scroll_binds = mods_with_finger_scroll_binds(mod_key, &config_.binds);
 
-        let mut hotkey_overlay = HotkeyOverlay::new(config.clone(), mod_key);
-        if !config_.hotkey_overlay.skip_at_startup {
-            hotkey_overlay.show();
-        }
-
         event_loop
             .insert_source(
                 Timer::from_duration(Duration::from_secs(1)),
@@ -1907,8 +1888,6 @@ impl Niri {
             vertical_finger_scroll_tracker: ScrollTracker::new(10),
             horizontal_finger_scroll_tracker: ScrollTracker::new(10),
             mods_with_finger_scroll_binds,
-
-            hotkey_overlay,
 
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
@@ -3137,11 +3116,6 @@ impl Niri {
             Kind::Unspecified,
         )
         .into();
-
-        // Draw the hotkey overlay on top.
-        if let Some(element) = self.hotkey_overlay.render(renderer, output) {
-            elements.push(element.into());
-        }
 
         // Don't draw the focus ring on the workspaces while interactively moving above those
         // workspaces, since the interactively-moved window already has a focus ring.

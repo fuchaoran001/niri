@@ -63,10 +63,6 @@ pub mod render_helpers;
 /// 模拟物理滚动效果（如惯性滚动、边界回弹）
 pub mod rubber_band;
 
-/// 声明公共模块 ui - 用户界面组件
-/// 包含状态栏、菜单等合成器自有界面元素
-pub mod ui;
-
 /// 声明公共模块 utils - 工具函数集
 /// 提供跨模块使用的辅助函数(如几何计算)
 pub mod utils;
