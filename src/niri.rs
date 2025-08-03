@@ -81,7 +81,6 @@ use smithay::wayland::keyboard_shortcuts_inhibit::{
 };
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraintsState};
-use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::security_context::SecurityContextState;
@@ -234,7 +233,6 @@ pub struct Niri {
     pub input_method_state: InputMethodManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub virtual_keyboard_state: VirtualKeyboardManagerState,
-    pub pointer_gestures_state: PointerGesturesState,
     pub relative_pointer_state: RelativePointerManagerState,
     pub pointer_constraints_state: PointerConstraintsState,
     pub idle_notifier_state: IdleNotifierState<State>,
@@ -400,7 +398,6 @@ pub enum KeyboardFocus {
     Layout { surface: Option<WlSurface> },
     LayerShell { surface: WlSurface },
     LockScreen { surface: Option<WlSurface> },
-    ScreenshotUi,
     Overview,
 }  
 
@@ -469,7 +466,6 @@ impl KeyboardFocus {
             KeyboardFocus::Layout { surface } => surface.as_ref(),
             KeyboardFocus::LayerShell { surface } => Some(surface),
             KeyboardFocus::LockScreen { surface } => surface.as_ref(),
-            KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::Overview => None,
         }
     }  
@@ -479,7 +475,6 @@ impl KeyboardFocus {
             KeyboardFocus::Layout { surface } => surface,
             KeyboardFocus::LayerShell { surface } => Some(surface),
             KeyboardFocus::LockScreen { surface } => surface,
-            KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::Overview => None,
         }
     }  
@@ -1585,7 +1580,6 @@ impl Niri {
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<State>(&display_handle);
         let mut seat_state = SeatState::new();
-        let pointer_gestures_state = PointerGesturesState::new::<State>(&display_handle);
         let relative_pointer_state = RelativePointerManagerState::new::<State>(&display_handle);
         let pointer_constraints_state = PointerConstraintsState::new::<State>(&display_handle);
         let idle_notifier_state = IdleNotifierState::new(&display_handle, event_loop.clone());
@@ -1781,7 +1775,6 @@ impl Niri {
             dmabuf_state,
             fractional_scale_manager_state,
             seat_state,
-            pointer_gestures_state,
             relative_pointer_state,
             pointer_constraints_state,
             idle_notifier_state,
@@ -2882,7 +2875,6 @@ impl Niri {
             // FIXME: when going into the screenshot UI from a layer-shell focus, and then back to
             // layer-shell, the layout will briefly draw as active, despite never having focus.
             KeyboardFocus::LockScreen { .. } => true,
-            KeyboardFocus::ScreenshotUi => true,
             KeyboardFocus::Overview => true,
         };
 
