@@ -1197,7 +1197,6 @@ impl State {
         let mut window_rules_changed = false;
         let mut layer_rules_changed = false;
         let mut shaders_changed = false;
-        let mut cursor_inactivity_timeout_changed = false;
         let mut old_config = self.niri.config.borrow_mut();
 
         // Reload the cursor.
@@ -1270,10 +1269,6 @@ impl State {
             shaders_changed = true;
         }
 
-        if config.cursor.hide_after_inactive_ms != old_config.cursor.hide_after_inactive_ms {
-            cursor_inactivity_timeout_changed = true;
-        }
-
         if config.debug.keep_laptop_panel_on_when_lid_is_closed
             != old_config.debug.keep_laptop_panel_on_when_lid_is_closed
         {
@@ -1343,12 +1338,6 @@ impl State {
 
         if shaders_changed {
             self.niri.update_shaders();
-        }
-
-        if cursor_inactivity_timeout_changed {
-            // Force reset due to timeout change.
-            self.niri.pointer_inactivity_timer_got_reset = false;
-            self.niri.reset_pointer_inactivity_timer();
         }
 
         // Can't really update xdg-decoration settings since we have to hide the globals for CSD
@@ -1780,7 +1769,7 @@ impl Niri {
             .unwrap();
 
         drop(config_);
-        let mut niri = Self {
+        let niri = Self {
             config,
             config_file_output_config,
 
@@ -1887,8 +1876,6 @@ impl Niri {
             ipc_outputs_changed: false,
 
         };
-
-        niri.reset_pointer_inactivity_timer();
 
         niri
     }
@@ -3950,42 +3937,6 @@ impl Niri {
         }
     }
 
-    pub fn reset_pointer_inactivity_timer(&mut self) {
-        if self.pointer_inactivity_timer_got_reset {
-            return;
-        }
-
-        let _span = tracy_client::span!("Niri::reset_pointer_inactivity_timer");
-
-        if let Some(token) = self.pointer_inactivity_timer.take() {
-            self.event_loop.remove(token);
-        }
-
-        let Some(timeout_ms) = self.config.borrow().cursor.hide_after_inactive_ms else {
-            return;
-        };
-
-        let duration = Duration::from_millis(timeout_ms as u64);
-        let timer = Timer::from_duration(duration);
-        let token = self
-            .event_loop
-            .insert_source(timer, move |_, _, state| {
-                state.niri.pointer_inactivity_timer = None;
-
-                // If the pointer is already invisible, don't reset it back to Hidden causing one
-                // frame of hover.
-                if state.niri.pointer_visibility.is_visible() {
-                    state.niri.pointer_visibility = PointerVisibility::Hidden;
-                    state.niri.queue_redraw_all();
-                }
-
-                TimeoutAction::Drop
-            })
-            .unwrap();
-        self.pointer_inactivity_timer = Some(token);
-
-        self.pointer_inactivity_timer_got_reset = true;
-    }
 
     pub fn notify_activity(&mut self) {
         if self.notified_activity_this_iteration {

@@ -184,10 +184,6 @@ impl State {
             }
         }
 
-        if should_reset_pointer_inactivity_timer(&event) {
-            self.niri.reset_pointer_inactivity_timer();
-        }
-
         use InputEvent::*;
         match event {
             DeviceAdded { device } => self.on_device_added(device),
@@ -3773,15 +3769,6 @@ fn should_notify_activity<I: InputBackend>(event: &InputEvent<I>) -> bool {
     )
 }
 
-fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>) -> bool {
-    matches!(
-        event,
-        InputEvent::PointerAxis { .. }
-            | InputEvent::PointerButton { .. }
-            | InputEvent::PointerMotion { .. }
-            | InputEvent::PointerMotionAbsolute { .. }
-    )
-}
 
 fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
     let mods = modifiers_from_state(mods);
